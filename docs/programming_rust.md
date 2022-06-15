@@ -229,21 +229,46 @@ This is Rust's radical wager, again.
 
 ### References to Values
 
+```rust
+use std::collections::HashMap;
+
+type Table = HashMap<String, Vec<String>>;
+
+fn show(table: Table) {
+    for (artist, works) in table {
+        println!("works by {}:", artist);
+        for work in works {
+            println!(" {}", work);
+        }
+    }
+}
+```
+In particular, `HashMap` is not `Copy` - it can't be, since it owns a dynamically allocated table.
+
 The right way to handle this is to use references.
 A reference lets you access a value without affecting its ownership.
 References come in two kinds:
 * A *shared reference* lets you read but not modify its referent.
 However, you can have as many shared references to a particular value at a time as you like.
-The expression `&e` yields a shared reference to `e`'s value; if e has the type `T`, then &e has the type `&T`, pronounced "ref T."
+The expression `&e` yields a shared reference to `e`'s value; if e has the type `T`, then `&e` has the type `&T`, pronounced "ref `T`."
 Shared references are `Copy`.
+* If you have *mutable reference* to a value, you may both read and modify the value.
+However, you may not have any other references of any sort to that value active at the same time.
+The expression `&mut e` yields a mutable reference to `e`'s value; you write its type as `&mut T`, which is pronounced "ref mute `T`."
+Mutable references are not `Copy`.
 
-You can think of the distinction between shared and mutable references as a way to enforce a multiple readers or single writer rule at compile time.
+You can think of the distinction between shared and mutable references as a way to enforce a *multiple readers or single writer* rule at compile time.
 In fact, this rule doesn't apply only to references; it covers the borrowed value's owner as well.
 As long as there are shared references to a value, not even its owner can modify it; the value is locked down.
-Nobody can modify table while show is working with it.
+Nobody can modify `table` while `show` is working with it.
 Similarly, if there is a mutable reference to a value, it has exclusive access to the value; you can't use the owner at all, until the mutable reference goes away.
 Keeping sharing and mutation fully separate turns out to be essential to memory safety, for reasons we'll go into later in the chapter.
 
+The printing function in our example doesn't need to modify the table, just read its contents.
+So the caller should be able to pass it a shared reference to the table, as follows:
+```rust
+show(&table);
+```
 When we pass a value to a function in a way that moves ownership of the value to the function, we say that we have passed it *by value*.
 If we instead pass the function a reference to the value, we say that we have passed the value *by reference*.
 
@@ -252,7 +277,7 @@ If we instead pass the function a reference to the value, we say that we have pa
 The preceding example shows a pretty typical use for references: allowing functions to access or manipulate a structure without taking ownership.
 But references are more flexible than that, so let's look at some examples to get a more detailed view of what's going on.
 
-### Rust References Versus C++ References
+#### Rust References Versus C++ References
 
 In Rust, references are created explicitly with the `&` operator, and dereferenced explicitly with the `*` operator:
 ```rust
@@ -286,7 +311,7 @@ v.sort();           // implicitly borrows a mutable reference to v
 ```
 In a nutshell, whereas C++ converts implicitly between references and lvalues (that is, expressions referring to locations in memory), with these conversions appearing anywhere they're needed, in Rust you use the `&` and `*` operators to create and follow references, with the exception of the `.` operator, which borrows and dereferences implicitly.
 
-### Assigning References
+#### Assigning References
 
 Assigning a reference to a variable makes that variable point somewhere new:
 ```rust
@@ -302,18 +327,34 @@ This behavior may seem too obvious to be worth mentioning: of course `r` now poi
 But we point this out because C++ references behave very differently: as shown earlier, assigning a value to a reference in C++ stores the value in its referent.
 Once a C++ reference has been initialized, there's no way to make it point at anything else.
 
-### References to References
+#### References to References
 
 Rust permits references to references:
 
-### Comparing References
+#### Comparing References
 
 Like the `.` operator, Rust's comparison operators "see through" any number of references:
+```rust
+let x = 10;
+let y = 10;
+
+let rx = &x;
+let ry = &y;
+
+let rrx = &rx;
+let rry = &ry;
+
+assert!(rrx <= rry);
+assert!(rrx == rry);
+```
 
 ### References Are Never Null
 
+Rust references are never null.
 In Rust, if you need a value that is either a reference to something or not, use the type `Option<&T>`.
-At the machine level, Rust represents `None` as a null pointer and `Some(r)`, where r is a `&T` value, as the nonzero address, so `Option<&T>` is just as efficient as a nullable pointer in C or C++, even though it's safer: its type requires you to check whether it's `None` before you can use it.
+At the machine level, Rust represents `None` as a null pointer and `Some(r)`, where `r` is a `&T` value, as the nonzero address, so `Option<&T>` is just as efficient as a nullable pointer in C or C++, even though it's safer: its type requires you to check whether it's `None` before you can use it.
+
+### Borrowing References to Arbitrary Expressions
 
 ### References to Slices and Trait Objects
 
@@ -358,15 +399,20 @@ The third lifetime is that of a reference type: the type of the reference we bor
 
 Here's one constraint that should seem pretty obvious: if you have a variable `x`, then a reference to `x` must not outlive `x` itself, as shown in Figure 5-3.
 
+Beyond the point where `x` goes out of scope, the reference would be a dangling pointer.
+We say that the variable's lifetime must *contain* or *enclose* that of the reference borrowed from it.
+
 Here's another kind of constraint: if you store a reference in a variable `r`, the reference's type must be good for the entire lifetime of the variable, from its initialization until its last use, as shown in Figure 5-4.
 
 If the reference can't live at least as long as the variable does, then at some point `r` will be a dangling pointer.
-We say that the reference's lifetime must contain or enclose the variable's.
+We say that the reference's lifetime must *contain* or *enclose* the variable's.
 
 The first kind of constraint limits how large a reference's lifetime can be, while the second kind limits how small it can be.
 Rust simply tries to find a lifetime for each reference that satisfies all these constraints.
 
 #### Receiving References as Function Arguments
+
+When we pass a reference to a function, how does Rust make sure the function uses it safely?
 
 The signature of `f` as written here is actually shorthand for the following:
 ```rust
@@ -380,7 +426,7 @@ This assignment then becomes a point of contention:
 ```rust
 STASH = p;
 ```
-Since STASH lives for the program's entire execution, the reference type it holds must have a lifetime of the same length; Rust calls this the `'static` lifetime.
+Since `STASH` lives for the program's entire execution, the reference type it holds must have a lifetime of the same length; Rust calls this the `'static` lifetime.
 But the lifetime of `p`'s reference is some `'a`, which could be anything, as long as it encloses the call to `f`.
 So, Rust rejects our code:
 
@@ -399,13 +445,89 @@ fn f(p: &'static i32) {
 
 #### Passing References to Functions
 
+You only need to worry about lifetime parameters when defining functions and types; when using them, Rust infers the lifetimes for you.
+
 #### Returning References
 
-### Omitting Lifetime Parameters
+It's common for a function to take a reference to some data structure and then return a reference into some part of that structure.
+
+Lifetimes in function signatures let Rust assess the relationships between the references you pass to the function and those the function returns, and they ensure they're being used safely.
+
+#### Structs Containing References
+
+Whenever a reference type appears inside another type's definition, you must write out its lifetime.
+
+The alternative is to give the type a lifetime parameter `'a` and use that for `r`:
+```rust
+struct S<'a> {
+    r: &'a i32
+}
+```
+
+#### Distinct Lifetime Parameters
+
+The problem arises because both references in `S` have the same lifetime `'a`.
+Changing the definition of `S` to let each reference have a distinct lifetime fixes everything:
+```rust
+struct S<'a, 'b> {
+    x: &'a i32,
+    y: &'b i32
+}
+```
+
+#### Omitting Lifetime Parameters
+
+We've shown plenty of functions so far in this book that return references or take them as parameters, but we've usually not needed to spell out which lifetime is which.
+The lifetimes are there; Rust is just letting us omit them when it's reasonably obvious what they should be.
+
+### Sharing Versus Mutation
 
 ## Chapter 6. Expressions
 
 ### An Expression Language
+
+Rust is what is called an *expression language*.
+This means it follows an older tradition, dating back to Lisp, where expressions do all the work.
+
+### Blocks and Semicolons
+
+Blocks are the most general kind of expression.
+A block produces a value and can be used anywhere a value is needed:
+```rust
+let display_name = match post.author() {
+    Some(author) => author.name(),
+    None => {
+        let network_info = post.get_network_metadata()?;
+        let ip = network_info.client_address();
+        ip.to_string()
+    }
+};
+```
+Note that there is no semicolon after the `ip.to_string()` method call.
+Most lines of Rust code do end with either a semicolon or curly braces, just like C or Java.
+And if a block looks like C code, with semicolons in all the familiar places, then it will run just like a C block, and its value will be `()`.
+As we mentioned in Chapter 2, when you leave the semicolon off the last line of a block, that makes the value of the block the value of its final expression, rather than the usual `()`.
+
+### Declarations
+
+You may occasionally see code that seems to redeclare an existing variable, like this:
+```rust
+
+```
+
+### `if` and `match`
+
+### `if let`
+
+There is one more `if` form, the `if let` expression:
+```rust
+if let pattern = expr {
+    block1
+} else {
+    block2
+}
+```
+The given `expr` either matches the `pattern`, in which case `block1` runs, or doesn't match, and `block2` runs.
 
 ## Chapter 7. Error Handling
 
@@ -583,7 +705,57 @@ Unit-like structs have no components at all; these are not common, but more usef
 
 ### Named-Field Structs
 
+The definition of a named-field struct type looks like this:
+```rust
+/// A rectangle of eight-bit grayscale pixels.
+struct GrayscaleMap {
+    pixels: Vec<u8>,
+    size: (usize, usize)
+}
+```
+The convention in Rust is for all types, structs included, to have names that capitalize the first letter of each word, like `GrayscaleMap`, a convention called *CamelCase* (or *PascalCase*).
+Fields and methods are lowercase, with words separated by underscores. This is called *snake_case*.
+
+You can construct a value of this type with a *struct expression*, like this:
+```rust
+let width = 1024;
+let height = 576;
+let image = GrayscaleMap {
+    pixels: vec![0; width * height],
+    size: (width, height)
+};
+```
+
+To access a struct's fields, use the familiar `.` operator:
+```rust
+assert_eq!(image.size, (1024, 576));
+assert_eq!(image.pixels.len(), 1024 * 576);
+```
+
+Like all other items, structs are private by default, visible only in the module where they're declared and its submodules.
+You can make a struct visible outside its module by prefixing its definition with `pub`.
+The same goes for each of its fields, which are also private by default:
+```rust
+/// A rectangle of eight-bit grayscale pixels.
+pub struct GrayscaleMap {
+    pub pixels: Vec<u8>,
+    pub size: (usize, usize)
+}
+```
+
 ### Tuple-Like Structs
+
+The second kind of struct type is called a *tuple-like* struct, because it resembles a tuple:
+```rust
+struct Bounds(usize, usize);
+```
+You construct a value of this type much as you would construct a tuple, except that you must include the struct name:
+```rust
+let image_bounds = Bounds(1024, 768);
+```
+
+Tuple-like structs are good for *newtypes*, structs with a single component that you define to get stricter type checking.
+For example, if you are working with ASCII-only text, you might define a newtype like this:
 
 ### Unit-Like Structs
 
@@ -655,7 +827,7 @@ Most often, a trait represents a capability: something a type can do.
 Only calls through `&mut dyn Write` incur the overhead of a dynamic dispatch, also known as a virtual method call, which is indicated by the `dyn` keyword in the type.
 `dyn Write` is known as a *trait object*; we'll look at the technical details of trait objects, and how they compare to generic functions, in the following sections.
 
-### Trait Objects
+#### Trait Objects
 
 ```rust
 let mut buf: Vec<u8> = vec![];
@@ -682,6 +854,48 @@ let mut local_file = File::create("hello.txt")?;
 say_hello(&mut local_file)?;
 ```
 
+### Defining and Implementing Traits
+
+Defining a trait is simple.
+Give it a name and list the type signatures of the trait methods.
+
+To implement a trait, use the syntax `impl TraitName for Type`:
+
+#### Default Methods
+
+#### Traits and Other People's Types
+
+Rust lets you implement any trait on any type, as long as either the trait or the type is introduced in the current crate.
+
+#### `Self` in Traits
+
+A trait can use the keyword `Self` as a type.
+
+#### Subtraits
+
+We can declare that a trait is an extension of another trait:
+```rust
+/// Someone in the game world, either the player or some other
+/// pixie, gargoyle, squirrel, ogre, etc.
+trait Creature: Visible {
+    fn position(&self) -> (i32, i32);
+    fn facing(&self) -> Direction;
+    ...
+}
+```
+The phrase trait `Creature: Visible` means that all creatures are visible.
+Every type that implements `Creature` must also implement the `Visible` trait:
+
+In fact, Rust's subtraits are really just a shorthand for a bound on `Self`.
+A definition of `Creature` like this is exactly equivalent to the one shown earlier:
+```rust
+trait Creature where Self: Visible {
+    ...
+}
+```
+
+#### Type-Associated Functions
+
 ## Chapter 12. Operator Overloading
 
 You can make your own types support arithmetic and other operators, too, just by implementing a few built-in traits.
@@ -691,6 +905,30 @@ This is called *operator overloading*, and the effect is much like operator over
 
 In Rust, the expression `a + b` is actually shorthand for `a.add(b)`, a call to the `add` method of the standard library's `std::ops::Add` trait.
 Rust's standard numeric types all implement `std::ops::Add`.
+
+## Unary Operators
+
+## Binary Operators
+
+## Compound Assignment Operators
+
+## Equivalence Comparisons
+
+Rust's equality operators, `==` and `!=`, are shorthand for calls to the `std::cmp::PartialEq` trait's `eq` and `ne` methods:
+```rust
+assert_eq!(x == y, x.eq(&y));
+assert_eq!(x != y, x.ne(&y));
+```
+
+Implementations of `PartialEq` are almost always of the form shown here: they compare each field of the left operand to the corresponding field of the right.
+These get tedious to write, and equality is a common operation to support, so if you ask, Rust will generate an implementation of `PartialEq` for you automatically.
+Simply add `PartialEq` to the type definition's `derive` attribute like so:
+```rust
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Complex<T> {
+    ...
+}
+```
 
 ## Chapter 13. Utility Traits
 
@@ -706,10 +944,64 @@ Traits of this sort are called *marker traits*, because the Rust language itself
 However, Rust also has a few *unsized types* whose values are not all the same size.
 For example, the string slice type `str` (note, without an `&`) is unsized.
 
+Since unsized types are so limited, most generic type variables should be restricted to `Sized` types.
+In fact, this is necessary so often that it is the implicit default in Rust: if you write `struct S<T> { ... }`, Rust understands you to mean struct `S<T: Sized> { ... }`.
+If you do not want to constrain `T` this way, you must explicitly opt out, writing struct `S<T: ?Sized> { ... }`.
+The `?Sized` syntax is specific to this case and means "not necessarily `Sized`."
+For example, if you write `struct S<T: ?Sized> { b: Box<T> }`, then Rust will allow you to write `S<str>` and `S<dyn Write>`, where the box becomes a fat pointer, as well as `S<i32>` and `S<String>`, where the box is an ordinary pointer.
+
+### `Default`
+
 ### `AsRef` and `AsMut`
 
 When a type implements `AsRef<T>`, that means you can borrow a `&T` from it efficiently.
 `AsMut` is the analogue for mutable references.
+Their definitions are as follows:
+```rust
+trait AsRef<T: ?Sized> {
+    fn as_ref(&self) -> &T;
+}
+
+trait AsMut<T: ?Sized> {
+    fn as_mut(&mut self) -> &mut T;
+}
+```
+
+`AsRef` is typically used to make functions more flexible in the argument types they accept.
+For example, the `std::fs::File::open` function is declared like this:
+```rust
+fn open<P: AsRef<Path>>(path: P) -> Result<File>
+```
+
+## Chapter 14. Closures
+
+### Capturing Variables
+
+A closure can use data that belongs to an enclosing function.
+For example:
+```rust
+/// Sort by any of several different statistics.
+fn sort_by_statistic(cities: &mut Vec<City>, stat: Statistic) {
+    cities.sort_by_key(|city| -city.get_statistic(stat));
+}
+```
+The closure here uses `stat`, which is owned by the enclosing function, `sort_by_statistic`.
+We say that the closure "captures" `stat`.
+This is one of the classic features of closures, so naturally, Rust supports it; but in Rust, this feature comes with a string attached.
+
+## Chapter 18. Input and Output
+
+### Readers and Writers
+
+#### Readers
+
+#### Buffered Readers
+
+For efficiency, readers and writers can be *buffered*, which simply means they have a chunk of memory (a buffer) that holds some input or output data in memory.
+
+### Files and Directories
+
+
 
 ## Chapter 21. Macros
 
