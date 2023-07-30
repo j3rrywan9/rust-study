@@ -2,7 +2,12 @@
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TimeUnit {
-    Seconds, Minutes, Hours, Days, Months, Years,
+    Seconds,
+    Minutes,
+    Hours,
+    Days,
+    Months,
+    Years,
 }
 
 impl TimeUnit {
