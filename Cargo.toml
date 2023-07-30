@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "chrono_panic_poc",
     "httpie",
     "leetcode",
     "samples",
