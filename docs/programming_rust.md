@@ -76,8 +76,8 @@ We declare a mutable local variable `numbers` and initialize it to an empty vect
 Even though vectors are designed to be grown and shrunk dynamically, we must still mark the variable `mut` for Rust to let us push numbers onto the end of it.
 
 We use `Result`'s `expect` method to check the success of our parse.
-If the result is an `Err(e)`, `expect` prints a message that includes a description of e and exits the program immediately.
-However, if the result is `Ok(v)`, expect simply returns `v` itself, which we are finally able to push onto the end of our vector of numbers.
+If the result is an `Err(e)`, `expect` prints a message that includes a description of `e` and exits the program immediately.
+However, if the result is `Ok(v)`, `expect` simply returns `v` itself, which we are finally able to push onto the end of our vector of numbers.
 
 ```rust
 let mut d = numbers[0];
@@ -107,6 +107,10 @@ To a great extent, the Rust language is designed around its types.
 Its support for high-performance code arises from letting developers choose the data representation that best fits the situation, with the right balance between simplicity and cost.
 
 ### Tuples
+
+A *tuple* is a pair, or triple, quadruple, quintuple, etc. (hence, *n-tuple*, or *tuple*), of values of assorted types.
+
+Rust code often uses tuple type to return multiple values from a function.
 
 ### Pointer Types
 
@@ -528,6 +532,25 @@ if let pattern = expr {
 }
 ```
 The given `expr` either matches the `pattern`, in which case `block1` runs, or doesn't match, and `block2` runs.
+Sometimes this is a nice way to get data out of an `Option` or `Result`:
+```rust
+if let Some(cookie) = request.session_cookie {
+    return restore_session(cookie);
+}
+
+if let Err(err) = show_cheesy_anti_robot_task() {
+    log_robot_attempt(err);
+    politely_accuse_user_of_being_a_robot();
+} else {
+    session.mark_as_human();
+}
+```
+
+### Loops
+
+### Type Casts
+
+### Closures
 
 ## Chapter 7. Error Handling
 
@@ -610,6 +633,36 @@ To ensure that this works, `?` can only be used on a `Result` in functions that 
 
 ### Handling Errors in `main()`
 
+In most places where a `Result` is produced, letting the error bubble up to the caller is the right behavior.
+This is why `?` is a single character in Rust.
+As we've seen, in some programs it's used on many lines of code in a row.
+
+But if you propagate an error long enough, eventually it reaches `main()`, and something has to be done with it.
+Normally, `main()` can't use `?` because its return type is not `Result`:
+```rust
+fn main() {
+    calculate_tides()?;  // error: can't pass the buck any further
+}
+```
+
+The simplest way to handle errors in `main()` is to use `.expect()`:
+```rust
+fn main() {
+    calculate_tides().expect("error");  // the buck stops here
+}
+```
+
+However, you can also change the type signature of `main()` to return a `Result` type, so you can use `?`:
+```rust
+fn main() -> Result<(), TideCalcError> {
+    let tides = calculate_tides()?;
+    print_tides(tides);
+    Ok(())
+}
+```
+
+If you have more complex error types or want to include more details in your message, it pays to print the error message yourself:
+
 ### Declaring a Custom Error Type
 
 ### Why Results?
@@ -623,15 +676,88 @@ This chapter covers the features of Rust that help keep your program organized: 
 Rust programs are made of *crates*.
 Each crate is a complete, cohesive unit: all the source code for a single library or executable, plus any associated tests, examples, tools, configuration, and other junk.
 
-### Editions
+The easiest way to see what crates are and how they work together is to use cargo build with the `--verbose` flag to build an existing project that has some dependencies.
+
+The word *dependencies* here just means other crates this project uses: code we're depending on.
+We found these crates on [crates.io](https://crates.io/), the Rust community's site for open source crates.
+
+The Cargo transcript tells the story of how this information is used.
+When we run `cargo build`, Cargo starts by downloading source code for the specified versions of these crates from crates.io.
+Then, it reads those crates' *Cargo.toml* files, downloads their dependencies, and so on recursively.
+
+The collection of all these dependency relationships, which tells Cargo everything it needs to know about what crates to build and in what order, is known as the *dependency graph* of the crate.
+Cargo's automatic handling of the dependency graph and transitive dependencies is a huge win in terms of programmer time and effort.
+
+#### Editions
 
 To evolve without breaking existing code, Rust uses *editions*.
 
-### Build Profiles
+#### Build Profiles
 
 ### Modules
 
-### Paths and Imports
+Whereas crates are about code sharing between projects, *modules* are about code organization within a project.
+They act as Rust's namespaces, containers for the functions, types, constants, and so on that make up your Rust program or library.
+
+The `pub` keyword makes an item public, so it can be accessed from outside the module.
+
+One function is marked `pub(crate)`, meaning that it is available anywhere inside this crate, but isn't exposed as part of the external interface.
+It can't be used by other crates, and it won't show up in this crate's documentation.
+
+Anything that isn't marked `pub` is private and can only be used in the same module in which it is defined, or any child modules:
+
+#### Nested Modules
+
+Modules can nest, and it's fairly common to see a module that's just a collection of submodules:
+```rust
+mod plant_structures {
+    pub mod roots {
+        ...
+    }
+    pub mod stems {
+        ...
+    }
+    pub mod leaves {
+        ...
+    }
+}
+```
+
+#### Modules in Separate Files
+
+A module can also be written like this:
+```rust
+mod spores;
+```
+Earlier, we included the body of the `spores` module, wrapped in curly braces.
+Here, we're instead telling the Rust compiler that the `spores` module lives in a separate file, called *spores.rs*:
+```rust
+// spores.rs
+
+/// A cell made by an adult fern...
+pub struct Spore {
+    ...
+}
+
+/// Simulate the production of a spore by meiosis.
+pub fn produce_spore(factory: &mut Sporangium) -> Spore {
+    ...
+}
+
+/// Extract the genes in a particular spore.
+pub(crate) fn genes(spore: &Spore) -> Vec<Gene> {
+    ...
+}
+
+/// Mix genes to prepare for meiosis (part of interphase).
+fn recombine(parent: &mut Cell) {
+    ...
+}
+```
+*spores.rs* contains only the items that make up the module.
+It doesn't need any kind of boilerplate to declare that it's a module.
+
+#### Paths and Imports
 
 The `::` operator is used to access features of a module.
 Code anywhere in your project can refer to any standard library feature by writing out its path:
@@ -659,6 +785,14 @@ Modules do *not* automatically inherit names from their parent modules.
 The keywords `super` and `crate` have a special meaning in paths: `super` refers to the parent module, and `crate` refers to the crate containing the current module.
 
 Using paths relative to the crate root rather than the current module makes it easier to move code around the project, since all the imports won't break if the path of the current module changes.
+
+#### The Standard Prelude
+
+#### Making `use` Declarations `pub`
+
+#### Making Struct Fields `pub`
+
+#### Statics and Constants
 
 ### Turning a Program into a Library
 
@@ -753,9 +887,14 @@ You construct a value of this type much as you would construct a tuple, except t
 ```rust
 let image_bounds = Bounds(1024, 768);
 ```
-
 Tuple-like structs are good for *newtypes*, structs with a single component that you define to get stricter type checking.
 For example, if you are working with ASCII-only text, you might define a newtype like this:
+```rust
+struct Ascii(Vec<u8>);
+```
+Using this type for your ASCII strings is much better than simply passing around `Vec<u8>` buffers and explaining what they are in the comments.
+The newtype helps Rust catch mistakes where some other byte buffer is passed to a function expecting ASCII text.
+
 
 ### Unit-Like Structs
 
@@ -766,14 +905,19 @@ For example, if you are working with ASCII-only text, you might define a newtype
 You can define methods on your own struct types as well.
 Rather than appearing inside the struct definition, as in C++ or Java, Rust methods appear in a separate `impl` block.
 
+An `impl` block is simply a collection of fn definitions, each of which becomes a method on the struct type named at the top of the block.
+
 Functions defined in an `impl` block are called *associated functions*, since they're associated with a specific type.
-The opposite of an associated function is a free function, one that is not defined as an `impl` block's item.
+The opposite of an associated function is a *free function*, one that is not defined as an `impl` block's item.
 
 Rust passes a method the value it's being called on as its first argument, which must have the special name `self`.
+Since `self`'s type is obviously the one named at the top of the `impl` block, or a reference to that, Rust lets you omit the type, and write `self`, `&self`, or `&mut self` as shorthand for `self: Queue`, `self: &Queue`, or `self: &mut Queue`.
 
-###
+Unlike C++ and Java, where the members of the "this" object are directly visible in method bodies as unqualified identifiers, a Rust method must explicitly use `self` to refer to the value it was called on, similar to the way Python methods use `self`, and the way JavaScript methods use `this`.
 
-### Type-Associated Functions
+#### Passing Self as a Box, Rc, or Arc
+
+#### Type-Associated Functions
 
 An `impl` block for a given type can also define functions that don't take `self` as an argument at all.
 These are still associated functions, since they're in an `impl` block, but they're not methods, since they don't take a `self` argument.
@@ -788,11 +932,103 @@ impl Queue {
 }
 ```
 
+### Associated Consts
+
+### Generic Structs
+
+Fortunately, Rust structs can be *generic*, meaning that their definition is a template into which you can plug whatever types you like.
+
+In generic struct definitions, the type names used in <angle brackets> are called *type parameters*.
+
+### Generic Structs with Lifetime Parameters
+
+### Generic Structs with Constant Parameters
+
+### Deriving Common Traits for Struct Types
+
+But in the case of these standard traits, and several others, you don't need to implement them by hand unless you want some kind of custom behavior. Rust can automatically implement them for you, with mechanical accuracy.
+Just add a `#[derive]` attribute to the struct:
+```rust
+#[derive(Copy, Clone, Debug, PartialEq)]
+struct Point {
+    x: f64,
+    y: f64
+}
+```
+Each of these traits can be implemented automatically for a struct, provided that each of its fields implements the trait.
+We can ask Rust to derive `PartialEq` for `Point` because its two fields are both of type `f64`, which already implements `PartialEq`.
+
+### Interior Mutability
+
 ## Chapter 10. Enums and Patterns
+
+A Rust enum can also contain data, even data of varying types.
 
 ### Enums
 
+Simple, C-style enums are straightforward:
+```rust
+enum Ordering {
+    Less,
+    Equal,
+    Greater,
+}
+```
+This declares a type `Ordering` with three possible values, called *variants* or *constructors*: `Ordering::Less`, `Ordering::Equal`, and `Ordering::Greater`.
+
+In memory, values of C-style enums are stored as integers.
+
+Casting a C-style enum to an integer is allowed:
+```rust
+assert_eq!(HttpStatus::Ok as i32, 200);
+```
+However, casting in the other direction, from the integer to the enum, is not.
+Unlike C and C++, Rust guarantees that an enum value is only ever one of the values spelled out in the enum declaration.
+An unchecked cast from an integer type to an enum type could break this guarantee, so it's not allowed.
+
+Enums can have methods, just like structs:
+```rust
+impl TimeUnit {
+    /// Return the plural noun for this time unit.
+    fn plural(self) -> &'static str {
+        match self {
+            TimeUnit::Seconds => "seconds",
+            TimeUnit::Minutes => "minutes",
+            TimeUnit::Hours => "hours",
+            TimeUnit::Days => "days",
+            TimeUnit::Months => "months",
+            TimeUnit::Years => "years",
+        }
+    }
+
+    /// Return the singular noun for this time unit.
+    fn singular(self) -> &'static str {
+        self.plural().trim_end_matches('s')
+    }
+}
+```
+So much for C-style enums.
+The more interesting sort of Rust enum is the kind whose variants hold data.
+
 ### Enums with Data
+
+In all, Rust has three kinds of enum variant, echoing the three kinds of struct we showed in the previous chapter.
+Variants with no data correspond to unit-like structs.
+Tuple variants look and function just like tuple structs.
+Struct variants have curly braces and named fields.
+A single enum can have variants of all three kinds:
+```rust
+enum RelationshipStatus {
+    Single,
+    InARelationship,
+    ItsComplicated(Option<String>),
+    ItsExtremelyComplicated {
+        car: DifferentialEquation,
+        cdr: EarlyModernistPoem,
+    },
+}
+```
+All constructors and fields of an enum share the same visibility as the enum itself.
 
 ## Chapter 11. Traits and Generics
 
@@ -814,6 +1050,8 @@ fn say_hello(out: &mut dyn Write) -> std::io::Result<()> {
 }
 ```
 The type of `out` is `&mut dyn Write`, meaning "a mutable reference to any value that implements the `Write` trait."
+
+*Generics* are the other flavor of polymorphism in Rust.
 
 ### Using Traits
 
@@ -844,6 +1082,7 @@ You can't query the type information directly, and Rust does not support downcas
 #### Trait object layout
 
 In memory, a trait object is a fat pointer consisting of a pointer to the value, plus a pointer to a table representing that value's type.
+Each trait object therefore takes up two machine words, as shown in Figure 11-1.
 
 In Rust, as in C++, the vtable is generated once, at compile time, and shared by all objects of the same type.
 
@@ -896,6 +1135,63 @@ trait Creature where Self: Visible {
 
 #### Type-Associated Functions
 
+In most object-oriented languages, interfaces can't include static methods or constructors, but traits can include type-associated functions, Rust's analog to static methods:
+```rust
+trait StringSet {
+    /// Return a new empty set.
+    fn new() -> Self;
+
+    /// Return a set that contains all the strings in `strings`.
+    fn from_slice(strings: &[&str]) -> Self;
+
+    /// Find out if this set contains a particular `value`.
+    fn contains(&self, string: &str) -> bool;
+
+    /// Add a string to this set.
+    fn add(&mut self, string: &str);
+}
+```
+
+### Fully Qualified Method Calls
+
+All the ways for calling trait methods we've seen so far rely on Rust filling in some missing pieces for you.
+For example, suppose you write the following:
+```rust
+"hello".to_string()
+```
+It's understood that `to_string` refers to the `to_string` method of the `ToString` trait, of which we're calling the `str` type's implementation.
+So there are four players in this game: the trait, the method of that trait, the implementation of that method, and the value to which that implementation is being applied.
+It's great that we don't have to spell all that out every time we want to call a method.
+But in some cases you need a way to say exactly what you mean.
+Fully qualified method calls fit the bill.
+
+First of all, it helps to know that a method is just a special kind of function.
+These two calls are equivalent:
+```rust
+"hello".to_string()
+
+str::to_string("hello")
+```
+The second form looks exactly like a associated function call.
+This works even though the `to_string` method takes a `self` argument.
+Simply pass `self` as the function's first argument.
+
+### Traits That Define Relationships Between Types
+
+#### Associated Types (or How Iterators Work)
+
+#### Generic Traits (or How Operator Overloading Works)
+
+#### `impl` Trait
+
+Rust has a feature called `impl Trait` designed for precisely this situation.
+`impl Trait` allows us to "erase" the type of a return value, specifying only the trait or traits it implements, without dynamic dispatch or a heap allocation:
+```rust
+fn cyclical_zip(v: Vec<u8>, u: Vec<u8>) -> impl Iterator<Item=u8> {
+    v.into_iter().chain(u.into_iter()).cycle()
+}
+```
+
 ## Chapter 12. Operator Overloading
 
 You can make your own types support arithmetic and other operators, too, just by implementing a few built-in traits.
@@ -919,6 +1215,27 @@ Rust's equality operators, `==` and `!=`, are shorthand for calls to the `std::c
 assert_eq!(x == y, x.eq(&y));
 assert_eq!(x != y, x.ne(&y));
 ```
+Here's the definition of `std::cmp::PartialEq`:
+```rust
+trait PartialEq<Rhs = Self>
+where
+    Rhs: ?Sized,
+{
+    fn eq(&self, other: &Rhs) -> bool;
+    fn ne(&self, other: &Rhs) -> bool {
+        !self.eq(other)
+    }
+}
+```
+Since the `ne` method has a default definition, you only need to define `eq` to implement the `PartialEq` trait, so here's a complete implementation for `Complex`:
+```rust
+impl<T: PartialEq> PartialEq for Complex<T> {
+    fn eq(&self, other: &Complex<T>) -> bool {
+        self.re == other.re && self.im == other.im
+    }
+}
+```
+In other words, for any component type `T` that itself can be compared for equality, this implements comparison for `Complex<T>`.
 
 Implementations of `PartialEq` are almost always of the form shown here: they compare each field of the left operand to the corresponding field of the right.
 These get tedious to write, and equality is a common operation to support, so if you ask, Rust will generate an implementation of `PartialEq` for you automatically.
@@ -929,8 +1246,17 @@ struct Complex<T> {
     ...
 }
 ```
+Rust's automatically generated implementation is essentially identical to our hand-written code, comparing each field or element of the type in turn.
+Rust can derive `PartialEq` implementations for enum types as well.
+Naturally, each of the values the type holds (or might hold, in the case of an enum) must itself implement `PartialEq`.
 
 ## Chapter 13. Utility Traits
+
+### `Drop`
+
+When a value's owner goes away, we say that Rust *drops* the value.
+Dropping a value entails freeing whatever other values, heap storage, and system resources the value owns.
+Drops occur under a variety of circumstances: when a variable goes out of scope; at the end of an expression statement; when you truncate a vector, removing elements from its end; and so on.
 
 ### `Sized`
 
@@ -949,6 +1275,41 @@ In fact, this is necessary so often that it is the implicit default in Rust: if 
 If you do not want to constrain `T` this way, you must explicitly opt out, writing struct `S<T: ?Sized> { ... }`.
 The `?Sized` syntax is specific to this case and means "not necessarily `Sized`."
 For example, if you write `struct S<T: ?Sized> { b: Box<T> }`, then Rust will allow you to write `S<str>` and `S<dyn Write>`, where the box becomes a fat pointer, as well as `S<i32>` and `S<String>`, where the box is an ordinary pointer.
+
+### `Clone`
+
+### `Copy`
+
+### `Deref` and `DerefMut`
+
+You can specify how dereferencing operators like `*` and `.` behave on your types by implementing the `std::ops::Deref` and `std::ops::DerefMut` traits.
+Pointer types like `Box<T>` and `Rc<T>` implement these traits so that they can behave as Rust's built-in pointer types do.
+For example, if you have a `Box<Complex>` value `b`, then `*b` refers to the `Complex` value that `b` points to, and `b.re` refers to its real component.
+If the context assigns or borrows a mutable reference to the referent, Rust uses the `DerefMut` ("dereference mutably") trait; otherwise, read-only access is enough, and it uses `Deref`.
+
+The traits are defined like this:
+```rust
+trait Deref {
+    type Target: ?Sized;
+    fn deref(&self) -> &Self::Target;
+}
+
+trait DerefMut: Deref {
+    fn deref_mut(&mut self) -> &mut Self::Target;
+}
+```
+The `deref` and `deref_mut` methods take a `&Self` reference and return a `&Self::Target` reference.
+`Target` should be something that `Self` contains, owns, or refers to: for `Box<Complex>` the `Target` type is `Complex`.
+Note that `DerefMut` extends `Deref`: if you can dereference something and modify it, certainly you should be able to borrow a shared reference to it as well.
+Since the methods return a reference with the same lifetime as `&self`, `self` remains borrowed for as long as the returned reference lives.
+
+The `Deref` and `DerefMut` traits play another role as well.
+Since `deref` takes a `&Self` reference and returns a `&Self::Target` reference, Rust uses this to automatically convert references of the former type into the latter.
+In other words, if inserting a `deref` call would prevent a type mismatch, Rust inserts one for you.
+Implementing `DerefMut` enables the corresponding conversion for mutable references.
+These are called the *deref coercions*: one type is being "coerced" into behaving as another.
+
+Rust will apply several deref coercions in succession if necessary.
 
 ### `Default`
 
@@ -973,6 +1334,27 @@ For example, the `std::fs::File::open` function is declared like this:
 fn open<P: AsRef<Path>>(path: P) -> Result<File>
 ```
 
+### `Borrow` and `BorrowMut`
+
+### `From` and `Into`
+
+The `std::convert::From` and `std::convert::Into` traits represent conversions that consume a value of one type and return a value of another.
+Whereas the `AsRef` and `AsMut` traits borrow a reference of one type from another, `From` and `Into` take ownership of their argument, transform it, and then return ownership of the result back to the caller.
+
+Their definitions are nicely symmetrical:
+```rust
+trait Into<T>: Sized {
+    fn into(self) -> T;
+}
+
+trait From<T>: Sized {
+    fn from(other: T) -> Self;
+}
+```
+The standard library automatically implements the trivial conversion from each type to itself: every type `T` implements `From<T>` and `Into<T>`.
+
+
+
 ## Chapter 14. Closures
 
 ### Capturing Variables
@@ -989,6 +1371,105 @@ The closure here uses `stat`, which is owned by the enclosing function, `sort_by
 We say that the closure "captures" `stat`.
 This is one of the classic features of closures, so naturally, Rust supports it; but in Rust, this feature comes with a string attached.
 
+#### Closures That Borrow
+
+#### Closures That Steal
+
+### Function and Closure Types
+
+Throughout this chapter, we've seen functions and closures used as values.
+Naturally, this means that they have types.
+For example:
+```rust
+fn city_population_descending(city: &City) -> i64 {
+    -city.population
+}
+```
+This function takes one argument (a `&City`) and returns an `i64`.
+It has the type `fn(&City) -> i64`.
+
+## Chapter 15. Iterators
+
+An *iterator* is a value that produces a sequence of values, typically for a loop to operate on.
+Rust's standard library provides iterators that traverse vectors, strings, hash tables, and other collections, but also iterators to produce lines of text from an input stream, connections arriving at a network server, values received from other threads over a communications channel, and so on.
+And of course, you can implement iterators for your own purposes.
+Rust's for loop provides a natural syntax for using iterators, but iterators themselves also provide a rich set of methods for mapping, filtering, joining, collecting, and so on.
+
+### The `Iterator` and `IntoIterator` Traits
+
+An iterator is any value that implements the `std::iter::Iterator` trait:
+```rust
+trait Iterator {
+    type Item;
+    fn next(&mut self) -> Option<Self::Item>;
+    ... // many default methods
+}
+```
+
+Under the hood, every `for` loop is just shorthand for calls to `IntoIterator` and `Iterator` methods:
+```rust
+let mut iterator = (&v).into_iter();
+while let Some(element) = iterator.next() {
+    println!("{}", element);
+}
+```
+
+### Creating Iterators
+
+The Rust standard library documentation explains in detail what sort of iterators each type provides, but the library follows some general conventions to help you get oriented and find what you need.
+
+#### `iter` and `iter_mut` Methods
+
+#### `IntoIterator` Implementations
+
+Most collections actually provide several implementations of `IntoIterator`, for shared references (`&T`), mutable references (`&mut T`), and moves (`T`):
+
+### Iterator Adapters
+
+Once you have an iterator in hand, the `Iterator` trait provides a broad selection of *adapter methods*, or simply *adapters*, that consume one iterator and build a new one with useful behaviors.
+To see how adapters work, we'll start with two of the most popular adapters, `map` and `filter`.
+Then we'll cover the rest of the adapter toolbox, covering almost any way you can imagine to make sequences of values from other sequences: truncation, skipping, combination, reversal, concatenation, repetition, and more.
+
+#### `map` and `filter`
+
+The `Iterator` trait's `map` adapter lets you transform an iterator by applying a closure to its items.
+The `filter` adapter lets you filter out items from an iterator, using a closure to decide which to keep and which to drop.
+
+There are two important points to notice about iterator adapters.
+
+First, simply calling an adapter on an iterator doesn't consume any items;
+it just returns a new iterator, ready to produce its own items by drawing from the first iterator as needed.
+In a chain of adapters, the only way to make any work actually get done is to call `next` on the final iterator.
+
+### Consuming Iterators
+
+#### Building Collections: `collect` and `FromIterator`
+
+Throughout the book, we've been using the `collect` method to build vectors holding an iterator's items.
+For example, in Chapter 2, we called `std::env::args()` to get an iterator over the program's command-line arguments and then called that iterator's `collect` method to gather them into a vector:
+```rust
+let args: Vec<String> = std::env::args().collect();
+```
+
+Naturally, `collect` itself doesn't know how to construct all these types.
+Rather, when some collection type like `Vec` or `HashMap` knows how to construct itself from an iterator, it implements the `std::iter::FromIterator` trait, for which `collect` is just a convenient veneer:
+```rust
+trait FromIterator<A>: Sized {
+    fn from_iter<T: IntoIterator<Item=A>>(iter: T) -> Self;
+}
+```
+If a collection type implements `FromIterator<A>`, then its type-associated function `from_iter` builds a value of that type from an iterable producing items of type `A`.
+
+#### The `Extend` Trait
+
+#### `partition`
+
+#### `for_each` and `try_for_each`
+
+## Chapter 16. Collections
+
+## Chapter 17. Strings and Text
+
 ## Chapter 18. Input and Output
 
 ### Readers and Writers
@@ -1001,11 +1482,241 @@ For efficiency, readers and writers can be *buffered*, which simply means they h
 
 ### Files and Directories
 
+## 19. Concurrency
 
+### Fork-Join Parallelism
+
+### Channels
+
+A *channel* is a one-way conduit for sending values from one thread to another.
+In other words, it's a thread-safe queue.
+
+#### Sending Values
+
+## Chapter 20. Asynchronous Programming
+
+Threads are good and necessary for distributing work across multiple processors, but their memory demands are such that we often need complementary ways, used together with threads, to break the work down.
+
+You can use Rust *asynchronous tasks* to interleave many independent activities on a single thread or a pool of worker threads.
+Asynchronous tasks are similar to threads, but are much quicker to create, pass control amongst themselves more efficiently, and have memory overhead an order of magnitude less than that of a thread.
+It is perfectly feasible to have hundreds of thousands of asynchronous tasks running simultaneously in a single program.
+Of course, your application may still be limited by other factors like network bandwidth, database speed, computation, or the work's inherent memory requirements, but the memory overhead inherent in the use of tasks is much less significant than that of threads.
+
+Generally, asynchronous Rust code looks very much like ordinary multithreaded code, except that operations that might block, like I/O or acquiring mutexes, need to be handled a bit differently.
+Treating these specially gives Rust more information about how your code will behave, which is what makes the improved performance possible.
+
+### From Synchronous to Asynchronous
+
+While this function is waiting for the system calls to return, its single thread is blocked: it can't do anything else until the system call finishes.
+
+To get around this, a thread needs to be able to take up other work while it waits for system calls to complete.
+But it's not obvious how to accomplish this.
+For example, the signature of the function we're using to read the response from the socket is:
+```rust
+fn read_to_string(&mut self, buf: &mut String) -> std::io::Result<usize>;
+```
+It's written right into the type: this function doesn't return until the job is done, or something goes wrong.
+This function is *synchronous*: the caller resumes when the operation is complete.
+If we want to use our thread for other things while the operating system does its work, we're going need a new I/O library that provides an *asynchronous* version of this function.
+
+#### Futures
+
+Rust's approach to supporting asynchronous operations is to introduce a trait, `std::future::Future`:
+```rust
+trait Future {
+    type Output;
+    // For now, read `Pin<&mut Self>` as `&mut Self`.
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output>;
+}
+
+enum Poll<T> {
+    Ready(T),
+    Pending,
+}
+```
+A `Future` represents an operation that you can test for completion.
+A future's `poll` method never waits for the operation to finish: it always returns immediately.
+If the operation is complete, `poll` returns `Poll::Ready(output)`, where `output` is its final result.
+Otherwise, it returns `Pending`.
+If and when the future is worth polling again, it promises to let us know by invoking a *waker*, a callback function supplied in the `Context`.
+We call this the "piñata model" of asynchronous programming: the only thing you can do with a future is whack it with a `poll` until a value falls out.
+
+This is the general pattern: the asynchronous version of any function takes the same arguments as the synchronous version, but the return type has a `Future` wrapped around it.
+
+#### Async Functions and Await Expressions
+
+Here's a version of `cheapo_request` written as an *asynchronous function*:
+```rust
+use async_std::io::prelude::*;
+use async_std::net;
+
+async fn cheapo_request(host: &str, port: u16, path: &str) -> std::io::Result<String>
+{
+    let mut socket = net::TcpStream::connect((host, port)).await?;
+
+    let request = format!("GET {} HTTP/1.1\r\nHost: {}\r\n\r\n", path, host);
+    socket.write_all(request.as_bytes()).await?;
+    socket.shutdown(net::Shutdown::Write)?;
+
+    let mut response = String::new();
+    socket.read_to_string(&mut response).await?;
+
+    Ok(response)
+}
+```
+This is token for token the same as our original version, except:
+* The function starts with `async fn` instead of `fn`.
+* It uses the `async_std` crate's asynchronous versions of `TcpStream::connect`, `write_all`, and `read_to_string`.
+These all return futures of their results.
+(The examples in this section use version `1.7` of `async_std`.)
+* After each call that returns a future, the code says `.await`.
+Although this looks like a reference to a struct field named `await`, it is actually special syntax built into the language for waiting until a future is ready.
+An `await` expression evaluates to the final value of the future.
+This is how the function obtains the results from `connect`, `write_all`, and `read_to_string`.
+
+Unlike an ordinary function, when you call an asynchronous function, it returns immediately, before the body begins execution at all.
+Obviously, the call's final return value hasn't been computed yet; what you get is a *future of* its final value.
+So if you execute this code:
+```rust
+let response = cheapo_request(host, port, path);
+```
+then `response` will be a future of a `std::io::Result<String>`, and the body of `cheapo_request` has not yet begun execution.
+You don't need to adjust an asynchronous function's return type;
+Rust automatically treats `async fn f(...) -> T` as a function that returns a future of a `T`, not a `T` directly.
+
+The future returned by an async function wraps up all the information the function body will need to run: the function's arguments, space for its local variables, and so on.
+(It's as if you'd captured the call's stack frame as an ordinary Rust value.)
+So `response` must hold the values passed for `host`, `port`, and `path`, since `cheapo_request`'s body is going to need those to run.
+
+The future's specific type is generated automatically by the compiler, based on the function's body and arguments.
+This type doesn't have a name;
+all you know about it is that it implements `Future<Output=R>`, where `R` is the async function's return type.
+In this sense, futures of asynchronous functions are like closures: closures also have anonymous types, generated by the compiler, that implement the `FnOnce`, `Fn`, and `FnMut` traits.
+
+When you first poll the future returned by `cheapo_request`, execution begins at the top of the function body and runs until the first `await` of the future returned by `TcpStream::connect`.
+The `await` expression polls the `connect` future, and if it is not ready, then it returns `Poll::Pending` to its own caller: polling `cheapo_request`'s future cannot proceed past that first `await` until a poll of `TcpStream::connect`'s future returns `Poll::Ready`.
+So a rough equivalent of the expression `TcpStream::connect(...).await` might be:
+```rust
+{
+    // Note: this is pseudocode, not valid Rust
+    let connect_future = TcpStream::connect(...);
+    'retry_point:
+    match connect_future.poll(cx) {
+        Poll::Ready(value) => value,
+        Poll::Pending => {
+            // Arrange for the next `poll` of `cheapo_request`'s
+            // future to resume execution at 'retry_point.
+            ...
+            return Poll::Pending;
+        }
+    }
+}
+```
+An `await` expression takes ownership of the future and then polls it.
+If it's ready, then the future's final value is the value of the `await` expression, and execution continues.
+Otherwise, it returns the `Poll::Pending` to its own caller.
+
+But crucially, the next poll of `cheapo_request`'s future doesn't start at the top of the function again: instead, it resumes execution mid-function at the point where it is about to poll `connect_future`.
+We don't progress to the rest of the async function until that future is ready.
+
+As `cheapo_request`'s future continues to be polled, it will work its way through the function body from one `await` to the next, moving on only when the subfuture it's awaiting is ready.
+Thus, how many times `cheapo_request`'s future must be polled depends on both the behavior of the subfutures and the function's own control flow.
+`cheapo_request`'s future tracks the point at which the next poll should resume, and all the local state - variables, arguments, temporaries — that resumption will need.
+
+The ability to suspend execution mid-function and then resume later is unique to async functions.
+When an ordinary function returns, its stack frame is gone for good.
+Since `await` expressions depend on the ability to resume, you can only use them inside async functions.
+
+As of this writing, Rust does not yet allow traits to have asynchronous methods.
+Only free functions and functions inherent to a specific type can be asynchronous.
+Lifting this restriction will require a number of changes to the language.
+In the meantime, if you need to define traits that include async functions, consider using the `async_trait` crate, which provides a macro-based workaround.
+
+#### Calling Async Functions from Synchronous Code: `block_on`
+
+In a sense, async functions just pass the buck.
+True, it's easy to get a future's value in an async function: just `await` it.
+But the async function *itself* returns a future, so it's now the caller's job to do the polling somehow.
+Ultimately, someone has to actually wait for a value.
+
+We can call `cheapo_request` from an ordinary, synchronous function (like `main`, for example) using `async_std`'s `task::block_on` function, which takes a future and polls it until it produces a value:
+```rust
+fn main() -> std::io::Result<()> {
+    use async_std::task;
+
+    let response = task::block_on(cheapo_request("example.com", 80, "/"))?;
+    println!("{}", response);
+    Ok(())
+}
+```
+Since `block_on` is a synchronous function that produces the final value of an asynchronous function, you can think of it as an adapter from the asynchronous world to the synchronous world.
+But its blocking character also means that you should never use `block_on` within an async function: it would block the entire thread until the value is ready.
+Use `await` instead.
+
+It doesn't sound too hard to just write a loop that calls `poll` over and over.
+But what makes `async_std::task::block_on` valuable is that it knows how to go to sleep until the future is actually worth polling again, rather than wasting your processor time and battery life making billions of fruitless `poll` calls.
+The futures returned by basic I/O functions like `connect` and `read_to_string` retain the waker supplied by the `Context` passed to `poll` and invoke it when `block_on` should wake up and try polling again.
+
+This is a lot of detail.
+Fortunately, you can usually just think in terms of the simplified upper timeline: some function calls are sync, others are async and need an `await`, but they're all just function calls.
+The success of Rust's asynchronous support depends on helping programmers work with the simplified view in practice, without being distracted by the back-and-forth of the implementation.
+
+#### Spawning Async Tasks
+
+The `async_std::task::block_on` function blocks until a future's value is ready.
+But blocking a thread completely on a single future is no better than a synchronous call: the goal of this chapter is to get the thread *doing other work* while it's waiting.
+
+For this, you can use `async_std::task::spawn_local`.
+This function takes a future and adds it to a pool that `block_on` will try polling whenever the future it's blocking on isn't ready.
+So if you pass a bunch of futures to `spawn_local` and then apply `block_on` to a future of your final result, `block_on` will poll each spawned future whenever it is able to make progress, running the entire pool concurrently until your result is ready.
+
+#### Async Blocks
+
+In addition to asynchronous functions, Rust also supports *asynchronous blocks*.
+Whereas an ordinary block statement returns the value of its last expression, an async block returns *a future of* the value of its last expression.
+You can use `await` expressions within an async block.
+
+An async block looks like an ordinary block statement, preceded by the `async` keyword:
+```rust
+let serve_one = async {
+    use async_std::net;
+
+    // Listen for connections, and accept one.
+    let listener = net::TcpListener::bind("localhost:8087").await?;
+    let (mut socket, _addr) = listener.accept().await?;
+
+    // Talk to client on `socket`.
+    ...
+};
+```
+
+#### Building Async Functions from Async Blocks
+
+Asynchronous blocks give us another way to get the same effect as an asynchronous function, with a little more flexibility.
+
+####
+
+#### But Does Your Future Implement `Send`?
+
+#### Long Running Computations: `yield_now` and `spawn_blocking`
+
+#### Comparing Asynchronous Designs
+
+In many ways Rust's approach to asynchronous programming resembles that taken by other languages.
+For example, JavaScript, C#, and Rust all have asynchronous functions with await expressions.
+And all these languages have values that represent incomplete computations: Rust calls them "futures," JavaScript calls them "promises," and C# calls them "tasks," but they all represent a value that you may have to wait for.
+
+Rust's use of polling, however, is unusual.
+In JavaScript and C#, an asynchronous function begins running as soon as it is called, and there is a global event loop built into the system library that resumes suspended async function calls when the values they were awaiting become available.
+In Rust, however, an async call does nothing until you pass it to a function like `block_on`, `spawn`, or `spawn_local` that will poll it and drive the work to completion.
+These functions, called *executors*, play the role that other languages cover with a global event loop.
 
 ## Chapter 21. Macros
 
 Rust supports *macros*, a way to extend the language in ways that go beyond what you can do with functions alone.
+
+Macros are a kind of shorthand.
+During compilation, before types are checked and long before any machine code is generated, each macro call is *expanded* - that is, it's replaced with some Rust code.
 
 ### Macro Basics
 
@@ -1022,3 +1733,7 @@ They're essentially regular expressions for matching code.
 But where regular expressions operate on characters, patterns operate on *tokens* - the numbers, names, punctuation marks, and so forth that are the building blocks of Rust programs.
 This means you can use comments and whitespace freely in macro patterns to make them as readable as possible.
 Comments and whitespace aren't tokens, so they don't affect matching.
+
+#### Unintended Consequences
+
+
