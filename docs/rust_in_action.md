@@ -10,9 +10,34 @@
 
 ## 2 Language foundations
 
+This chapter introduces you to the fundamentals of Rust programming.
+By the end of the chapter, you will be able to create command-line utilities and should be able to get the gist of most Rust programs.
+
 ### 2.1 Creating a running program
 
 #### 2.1.1 Compiling single files with `rustc`
+
+To translate it into a working program, we use software called a compiler.
+The compiler's role is to translate the source code into machine code, as well as take care of lots of bookkeeping to satisfy the operating system (OS) and CPU that it is a runnable program.
+The Rust compiler is called *rustc*.
+
+#### 2.1.2 Compiling Rust projects with `cargo`
+
+### 2.2 A glance at Rust's syntax
+
+### 2.3 Numbers
+
+### 2.4 Flow control
+
+#### 2.4.7 Match: Type-aware pattern matching
+
+### 2.5 Defining functions
+
+### 2.6 Using references
+
+A *reference* is a value that stands in place for another value.
+
+### 2.8 Advanced function definitions
 
 ### 2.10 Making lists of things with arrays, slices, and vectors
 
