@@ -148,6 +148,11 @@ A reference to a slice is a *fat pointer*: a two-word value comprising a pointer
 
 #### String Literals
 
+String literals are enclosed in double quotes.
+
+For these cases, Rust offers *raw strings*.
+A raw string is tagged with the lowercase letter `r`.
+
 #### Byte Strings
 
 #### Strings in Memory
@@ -156,6 +161,14 @@ Rust strings are sequences of Unicode characters, but they are not stored in mem
 Instead, they are stored using UTF-8, a variable-width encoding.
 Each ASCII character in a string is stored in one byte.
 Other characters take up multiple bytes.
+
+A `String` has a resizable buffer holding UTF-8 text.
+The buffer is allocated on the heap, so it can resize its buffer as needed or requested.
+You can think of a `String` as a `Vec<u8>` that is guaranteed to hold well-formed UTF-8; in fact, this is how `String` is implemented.
+
+A `&str` (pronounced "stir" or "string slice") is a reference to a run of UTF-8 text owned by someone else: it "borrows" the text.
+
+A string literal is a `&str` that refers to preallocated text, typically stored in read-only memory along with the program's machine code.
 
 ## Chapter 4. Ownership and Moves
 
@@ -166,6 +179,13 @@ Every value has a single owner that determines its lifetime.
 When the owner is freed - *dropped*, in Rust terminology - the owned value is dropped too.
 These rules are meant to make it easy for you to find any given value's lifetime simply by inspecting the code, giving you the control over its lifetime that a systems language should provide.
 
+A variable owns its value.
+When control leaves the block in which the variable is declared, the variable is dropped, so its value is dropped along with it.
+
+It follows that the owners and their owned values form *trees*: your owner is your parent, and the values you own are your children.
+And at the ultimate root of each tree is a variable; when that variable goes out of scope, the entire tree goes with it.
+
+Rust programs don't usually explicitly drop values at all, in the way C and C++ programs would use `free` and `delete`.
 The way to drop a value in Rust is to remove it from the ownership tree somehow: by leaving the scope of a variable, or deleting an element from a vector, or something of that sort.
 At that point, Rust ensures the value is properly dropped, along with everything it owns.
 
@@ -200,14 +220,29 @@ let t = s.clone();
 let u = s.clone();
 ```
 
-### More Operations That Move
+#### More Operations That Move
 
-### Moves and Control Flow
+In the examples thus far, we've shown initializations, providing values for variables as they come into scope in a `let` statement.
+Assigning to a variable is slightly different, in that if you move a value into a variable that was already initialized, Rust drops the variable's prior value.
+For example:
+```rust
+let mut s = "Govinda".to_string();
+s = "Siddhartha".to_string(); // value "Govinda" dropped here
+```
+Moving values around like this may sound inefficient, but there are two things to keep in mind.
+First, the moves always apply to the value proper, not the heap storage they own.
+For vectors and strings, the value proper is the three-word header alone; the potentially large element arrays and text buffers sit where they are in the heap.
+Second, the Rust compiler's code generation is good at "seeing through" all these moves; in practice, the machine code often stores the value directly where it belongs.
+
+#### Moves and Control Flow
 
 The previous examples all have very simple control flow; how do moves interact with more complicated code?
 The general principle is that, if it's possible for a variable to have had its value moved away and it hasn't definitely been given a new value since, it's considered uninitialized.
 
-### Moves and Indexed Content
+#### Moves and Indexed Content
+
+We've mentioned that a move leaves its source uninitialized, as the destination takes ownership of the value.
+But not every kind of value owner is prepared to become uninitialized.
 
 ### Copy Types: The Exception to Moves
 
@@ -215,6 +250,49 @@ Earlier we were careful to say that *most* types are moved; now we've come to th
 Assigning a value of a `Copy` type copies the value, rather than moving it.
 The source of the assignment remains initialized and usable, with the same value it had before.
 Passing `Copy` types to functions and constructors behaves similarly.
+
+The standard `Copy` types include all the machine integer and floating-point numeric types, the `char` and `bool` types, and a few others.
+A tuple or fixed-size array of `Copy` types is itself a `Copy` type.
+
+Only types for which a simple bit-for-bit copy suffices can be `Copy`.
+As we've already explained, `String` is not a `Copy` type, because it owns a heap-allocated buffer.
+For similar reasons, `Box<T>` is not `Copy`; it owns its heap-allocated referent.
+The `File` type, representing an operating system file handle, is not `Copy`; duplicating such a value would entail asking the operating system for another file handle.
+Similarly, the `MutexGuard` type, representing a locked mutex, isn't `Copy`: this type isn't meaningful to copy at all, as only one thread may hold a mutex at a time.
+
+As a rule of thumb, any type that needs to do something special when a value is dropped cannot be `Copy`: a `Vec` needs to free its elements, a `File` needs to close its file handle, a `MutexGuard` needs to unlock its mutex, and so on.
+Bit-for-bit duplication of such types would leave it unclear which value was now responsible for the original's resources.
+
+What about types you define yourself?
+By default, `struct` and `enum` types are not `Copy`:
+```rust
+struct Label { number: u32 }
+
+fn print(l: Label) { println!("STAMP: {}", l.number); }
+
+let l = Label { number: 3 };
+print(l);
+println!("My label number is: {}", l.number);
+```
+This won't compile;
+
+But user-defined types being non-`Copy` is only the default.
+If all the fields of your struct are themselves `Copy`, then you can make the type `Copy` as well by placing the attribute `#[derive(Copy, Clone)]` above the definition, like so:
+```rust
+#[derive(Copy, Clone)]
+struct Label { number: u32 }
+```
+With this change, the preceding code compiles without complaint.
+
+One of Rust's principles is that costs should be apparent to the programmer.
+Basic operations must remain simple.
+Potentially expensive operations should be explicit, like the calls to `clone` in the earlier example that make deep copies of vectors and the strings they contain.
+
+### `Rc` and `Arc`: Shared Ownership
+
+Although most values have unique owners in typical Rust code, in some cases it's difficult to find every value a single owner that has the lifetime you need; you'd like the value to simply live until everyone's done using it.
+For these cases, Rust provides the reference-counted pointer types `Rc` and `Arc`.
+As you would expect from Rust, these are entirely safe to use: you cannot forget to adjust the reference count, create other pointers to the referent that Rust doesn't notice, or stumble over any of the other sorts of problems that accompany reference-counted pointer types in C++.
 
 ## Chapter 5. References
 
@@ -248,13 +326,20 @@ fn show(table: Table) {
 }
 ```
 In particular, `HashMap` is not `Copy` - it can't be, since it owns a dynamically allocated table.
-
+So when the program calls `show(table)`, the whole structure gets moved to the function, leaving the variable table uninitialized.
+(It also iterates over its contents in no specific order, so if you've gotten a different order, don't worry.)
+If the calling code tries to use `table` now, it'll run into trouble:
+```rust
+...
+show(table);
+assert_eq!(table["Gesualdo"][0], "many madrigals");
+```
 The right way to handle this is to use references.
 A reference lets you access a value without affecting its ownership.
 References come in two kinds:
 * A *shared reference* lets you read but not modify its referent.
 However, you can have as many shared references to a particular value at a time as you like.
-The expression `&e` yields a shared reference to `e`'s value; if e has the type `T`, then `&e` has the type `&T`, pronounced "ref `T`."
+The expression `&e` yields a shared reference to `e`'s value; if `e` has the type `T`, then `&e` has the type `&T`, pronounced "ref `T`."
 Shared references are `Copy`.
 * If you have *mutable reference* to a value, you may both read and modify the value.
 However, you may not have any other references of any sort to that value active at the same time.
@@ -273,6 +358,8 @@ So the caller should be able to pass it a shared reference to the table, as foll
 ```rust
 show(&table);
 ```
+References are non-owning pointers, so the table variable remains the owner of the entire structure; `show` has just borrowed it for a bit.
+
 When we pass a value to a function in a way that moves ownership of the value to the function, we say that we have passed it *by value*.
 If we instead pass the function a reference to the value, we say that we have passed the value *by reference*.
 
@@ -351,10 +438,25 @@ let rry = &ry;
 assert!(rrx <= rry);
 assert!(rrx == rry);
 ```
+The final assertion here succeeds, even though `rrx` and `rry` point at different values (namely, `rx` and `ry`), because the `==` operator follows all the references and performs the comparison on their final targets, `x` and `y`.
+This is almost always the behavior you want, especially when writing generic functions.
+If you actually want to know whether two references point to the same memory, you can use `std::ptr::eq`, which compares them as addresses:
+```rust
+assert!(rx == ry);              // their referents are equal
+assert!(!std::ptr::eq(rx, ry)); // but occupy different addresses
+```
+Note that the operands of a comparison must have exactly the same type, including the references:
+```rust
+assert!(rx == rrx);    // error: type mismatch: `&i32` vs `&&i32`
+assert!(rx == *rrx);   // this is okay
+```
 
 ### References Are Never Null
 
 Rust references are never null.
+There's no analogue to C's `NULL` or C++'s `nullptr`.
+There is no default initial value for a reference (you can't use any variable until it's been initialized, regardless of its type) and Rust won't convert integers to references (outside of `unsafe` code), so you can't convert zero into a reference.
+
 In Rust, if you need a value that is either a reference to something or not, use the type `Option<&T>`.
 At the machine level, Rust represents `None` as a null pointer and `Some(r)`, where `r` is a `&T` value, as the nonzero address, so `Option<&T>` is just as efficient as a nullable pointer in C or C++, even though it's safer: its type requires you to check whether it's `None` before you can use it.
 
@@ -370,13 +472,15 @@ A reference to a slice is a fat pointer, carrying the starting address of the sl
 Rust's other kind of fat pointer is a *trait object*, a reference to a value that implements a certain trait.
 A trait object carries a value's address and a pointer to the trait's implementation appropriate to that value, for invoking the trait's methods.
 
+Aside from carrying this extra data, slice and trait object references behave just like the other sorts of references we've shown so far in this chapter: they don't own their referents, they are not allowed to outlive their referents, they may be mutable or shared, and so on.
+
 ### Reference Safety
 
 To convey the fundamental ideas, we'll start with the simplest cases, showing how Rust ensures references are used properly within a single function body.
 Then we'll look at passing references between functions and storing them in data structures.
 This entails giving said functions and data types *lifetime parameters*, which we'll explain.
 Finally, we'll present some shortcuts that Rust provides to simplify common usage patterns.
-Throughout, we’ll be showing how Rust points out broken code and often suggests solutions.
+Throughout, we'll be showing how Rust points out broken code and often suggests solutions.
 
 #### Borrowing a Local Variable
 
@@ -405,7 +509,18 @@ Here's one constraint that should seem pretty obvious: if you have a variable `x
 
 Beyond the point where `x` goes out of scope, the reference would be a dangling pointer.
 We say that the variable's lifetime must *contain* or *enclose* that of the reference borrowed from it.
-
+```rust
+{
+    let r;
+    {
+        let x = 1;
+        ...
+        r = &x;
+        ...
+    }
+    assert_eq!(*r, 1);
+}
+```
 Here's another kind of constraint: if you store a reference in a variable `r`, the reference's type must be good for the entire lifetime of the variable, from its initialization until its last use, as shown in Figure 5-4.
 
 If the reference can't live at least as long as the variable does, then at some point `r` will be a dangling pointer.
@@ -413,6 +528,12 @@ We say that the reference's lifetime must *contain* or *enclose* the variable's.
 
 The first kind of constraint limits how large a reference's lifetime can be, while the second kind limits how small it can be.
 Rust simply tries to find a lifetime for each reference that satisfies all these constraints.
+
+These rules apply in a natural way when you borrow a reference to some part of some larger data structure, like an element of a vector:
+```rust
+let v = vec![1, 2, 3];
+let r = &v[1];
+```
 
 #### Receiving References as Function Arguments
 
@@ -490,8 +611,13 @@ The lifetimes are there; Rust is just letting us omit them when it's reasonably 
 
 ### An Expression Language
 
+Expressions have values.
+Statements don't.
+
 Rust is what is called an *expression language*.
 This means it follows an older tradition, dating back to Lisp, where expressions do all the work.
+
+### Precedence and Associativity
 
 ### Blocks and Semicolons
 
@@ -521,6 +647,27 @@ You may occasionally see code that seems to redeclare an existing variable, like
 
 ### `if` and `match`
 
+The form of an `if` expression is familiar:
+```rust
+if condition1 {
+    block1
+} else if condition2 {
+    block2
+} else {
+    block_n
+}
+```
+Each `condition` must be an expression of type `bool`; true to form, Rust does not implicitly convert numbers or pointers to Boolean values.
+
+Rust prohibits `match` expressions that do not cover all possible values:
+```rust
+let score = match card.rank {
+    Jack => 10,
+    Queen => 10,
+    Ace => 11
+};  // error: nonexhaustive patterns
+```
+
 ### `if let`
 
 There is one more `if` form, the `if let` expression:
@@ -545,18 +692,90 @@ if let Err(err) = show_cheesy_anti_robot_task() {
     session.mark_as_human();
 }
 ```
+It's never strictly necessary to use `if let`, because `match` can do everything `if let` can do.
+An `if let` expression is shorthand for a `match` with just one pattern:
+```rust
+match expr {
+    pattern => { block1 }
+    _ => { block2 }
+}
+```
 
 ### Loops
 
+There are four looping expressions:
+```rust
+while condition {
+    block
+}
+
+while let pattern = expr {
+    block
+}
+
+loop {
+    block
+}
+
+for pattern in iterable {
+    block
+}
+```
+Loops are expressions in Rust, but the value of a `while` or `for` loop is always `()`, so their value isn't very useful.
+A `loop` expression can produce a value if you specify one.
+
+### Control Flow in Loops
+
+A `break` expression exits an enclosing loop.
+(In Rust, `break` works only in loops. It is not necessary in `match` expressions, which are unlike `switch` statements in this regard.)
+
+### `return` Expressions
+
+A `return` expression exits the current function, returning a value to the caller.
+
+### Why Rust Has `loop`
+
+### Function and Method Calls
+
+You'll notice that the `.` operator relaxes those rules a bit.
+In the method call `player.location()`, `player` might be a `Player`, a reference of type `&Player`, or a smart pointer of type `Box<Player>` or `Rc<Player>`.
+The `.location()` method might take the `player` either by value or by reference.
+The same `.location()` syntax works in all cases, because Rust's `.` operator automatically dereferences `player` or borrows a reference to it as needed.
+
+### Fields and Elements
+
+### Reference Operators
+
+### Arithmetic, Bitwise, Comparison, and Logical Operators
+
+### Assignment
+
 ### Type Casts
 
+Converting a value from one type to another usually requires an explicit cast in Rust.
+Casts use the `as` keyword:
+```rust
+let x = 17;              // x is type i32
+let index = x as usize;  // convert to usize
+```
+
 ### Closures
+
+### Onward
 
 ## Chapter 7. Error Handling
 
 Rust's approach to error handling is unusual enough to warrant a short chapter on the topic.
 There aren't any difficult ideas here, just ideas that might be new to you.
 This chapter covers the two different kinds of error handling in Rust: panic and `Result`s.
+
+Ordinary errors are handled using the `Result` type.
+`Result`s typically represent problems caused by things outside the program, like erroneous input, a network outage, or a permissions problem.
+That such situations occur is not up to us; even a bug-free program will encounter them from time to time.
+Most of this chapter is dedicated to that kind of error.
+We'll cover panic first, though, because it's the simpler of the two.
+
+Panic is for the other kind of error, the kind that *should never happen*.
 
 ### Panic
 
@@ -567,16 +786,38 @@ Something like:
 * Calling `.expect()` on a `Result` that happens to be `Err`
 * Assertion failure
 
-### Unwinding
+#### Unwinding
 
-### Aborting
+#### Aborting
 
 Stack unwinding is the default panic behavior, but there are two circumstances in which Rust does not try to unwind the stack.
 
+If a `.drop()` method triggers a second panic while Rust is still trying to clean up after the first, this is considered fatal.
+Rust stops unwinding and aborts the whole process.
+
 ### Result
 
-### Catching Errors
+Rust doesn't have exceptions.
+Instead, functions that can fail have a return type that says so:
+```rust
+fn get_weather(location: LatLng) -> Result<WeatherReport, io::Error>
+```
+The `Result` type indicates possible failure.
 
+#### Catching Errors
+
+The most thorough way of dealing with a `Result` is the way we showed in Chapter 2: use a `match` expression.
+```rust
+match get_weather(hometown) {
+    Ok(report) => {
+        display_weather(hometown, &report);
+    }
+    Err(err) => {
+        println!("error querying the weather: {}", err);
+        schedule_weather_retry();
+    }
+}
+```
 This is Rust's equivalent of `try/catch` in other languages.
 It's what you use when you want to handle errors head-on, not pass them on to your caller.
 
@@ -584,7 +825,7 @@ It's what you use when you want to handle errors head-on, not pass them on to yo
 Each of these methods has a `match` expression in its implementation.
 (For the full list of `Result` methods, consult the online documentation. The methods listed here are the ones we use the most.)
 
-### Result Type Aliases
+#### Result Type Aliases
 
 Sometimes you'll see Rust documentation that seems to omit the error type of a `Result`:
 ```rust
@@ -602,12 +843,18 @@ This defines a public type `std::io::Result<T>`.
 It's an alias for `Result<T, E>`, but hardcodes `std::io::Error` as the error type.
 In practical terms, this means that if you write use `std::io;`, then Rust will understand `io::Result<String>` as shorthand for `Result<String, io::Error>`.
 
-When something like ``Result<()>` appears in the online documentation, you can click on the identifier `Result` to see which type alias is being used and learn the error type.
+When something like `Result<()>` appears in the online documentation, you can click on the identifier `Result` to see which type alias is being used and learn the error type.
 In practice, it's usually obvious from context.
 
-### Printing Errors
+#### Printing Errors
 
-### Propagating Errors
+Sometimes the only way to handle an error is by dumping it to the terminal and moving on.
+We already showed one way to do this:
+```rust
+println!("error querying the weather: {}", err);
+```
+
+#### Propagating Errors
 
 In most places where we try something that could fail, we don't want to catch and handle the error immediately.
 It is simply too much code to use a 10-line `match` statement every place where something could go wrong.
@@ -625,13 +872,39 @@ The type of weather here is not `Result<WeatherReport, io::Error>` but simply `W
 * On error, it immediately returns from the enclosing function, passing the error result up the call chain.
 To ensure that this works, `?` can only be used on a `Result` in functions that have a `Result` return type.
 
-### Working with Multiple Error Types
+#### Working with Multiple Error Types
 
-### Dealing with Errors That "Can't Happen"
+Often, more than one thing could go wrong.
+Suppose we are simply reading numbers from a text file:
+```rust
+use std::io::{self, BufRead};
 
-### Ignoring Errors
+/// Read integers from a text file.
+/// The file should have one number on each line.
+fn read_numbers(file: &mut dyn BufRead) -> Result<Vec<i64>, io::Error> {
+    let mut numbers = vec![];
+    for line_result in file.lines() {
+        let line = line_result?;         // reading lines can fail
+        numbers.push(line.parse()?);     // parsing integers can fail
+    }
+    Ok(numbers)
+}
+```
 
-### Handling Errors in `main()`
+A simpler approach is to use what’s built into Rust.
+All of the standard library error types can be converted to the type `Box<dyn std::error::Error + Send + Sync + 'static>`.
+This is a bit of a mouthful, but `dyn std::error::Error` represents "any error," and `Send + Sync + 'static` makes it safe to pass between threads, which you'll often want.
+For convenience, you can define type aliases:
+```rust
+type GenericError = Box<dyn std::error::Error + Send + Sync + 'static>;
+type GenericResult<T> = Result<T, GenericError>;
+```
+
+#### Dealing with Errors That "Can't Happen"
+
+#### Ignoring Errors
+
+#### Handling Errors in `main()`
 
 In most places where a `Result` is produced, letting the error bubble up to the caller is the right behavior.
 This is why `?` is a single character in Rust.
@@ -644,14 +917,12 @@ fn main() {
     calculate_tides()?;  // error: can't pass the buck any further
 }
 ```
-
 The simplest way to handle errors in `main()` is to use `.expect()`:
 ```rust
 fn main() {
     calculate_tides().expect("error");  // the buck stops here
 }
 ```
-
 However, you can also change the type signature of `main()` to return a `Result` type, so you can use `?`:
 ```rust
 fn main() -> Result<(), TideCalcError> {
@@ -660,12 +931,11 @@ fn main() -> Result<(), TideCalcError> {
     Ok(())
 }
 ```
-
 If you have more complex error types or want to include more details in your message, it pays to print the error message yourself:
 
-### Declaring a Custom Error Type
+#### Declaring a Custom Error Type
 
-### Why Results?
+#### Why Results?
 
 ## Chapter 8. Crates and Modules
 
