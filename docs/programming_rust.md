@@ -1097,6 +1097,18 @@ So the convention, when your tests get substantial enough to require support cod
 #[cfg(test)]    // include this module only when testing
 ```
 
+### Specifying Dependencies
+
+We've seen one way of telling Cargo where to get source code for crates your project depends on: by version number.
+```rust
+image = "0.6.1"
+```
+
+#### Versions
+
+When you write something like `image = "0.13.0"` in your *Cargo.toml* file, Cargo interprets this rather loosely.
+It uses the most recent version of `image` that is considered compatible with version 0.13.0.
+
 ## Chapter 9. Structs
 
 Rust structs, sometimes called *structures*, resemble `struct` types in C and C++, classes in Python, and objects in JavaScript.
@@ -1118,7 +1130,8 @@ struct GrayscaleMap {
 }
 ```
 The convention in Rust is for all types, structs included, to have names that capitalize the first letter of each word, like `GrayscaleMap`, a convention called *CamelCase* (or *PascalCase*).
-Fields and methods are lowercase, with words separated by underscores. This is called *snake_case*.
+Fields and methods are lowercase, with words separated by underscores.
+This is called *snake_case*.
 
 You can construct a value of this type with a *struct expression*, like this:
 ```rust
@@ -1175,7 +1188,7 @@ The newtype helps Rust catch mistakes where some other byte buffer is passed to 
 You can define methods on your own struct types as well.
 Rather than appearing inside the struct definition, as in C++ or Java, Rust methods appear in a separate `impl` block.
 
-An `impl` block is simply a collection of fn definitions, each of which becomes a method on the struct type named at the top of the block.
+An `impl` block is simply a collection of `fn` definitions, each of which becomes a method on the struct type named at the top of the block.
 
 Functions defined in an `impl` block are called *associated functions*, since they're associated with a specific type.
 The opposite of an associated function is a *free function*, one that is not defined as an `impl` block's item.
@@ -1185,7 +1198,38 @@ Since `self`'s type is obviously the one named at the top of the `impl` block, o
 
 Unlike C++ and Java, where the members of the "this" object are directly visible in method bodies as unqualified identifiers, a Rust method must explicitly use `self` to refer to the value it was called on, similar to the way Python methods use `self`, and the way JavaScript methods use `this`.
 
-#### Passing Self as a Box, Rc, or Arc
+Since `push` and `pop` need to modify the `Queue`, they both take `&mut self`.
+However, when you call a method, you don’t need to borrow the mutable reference yourself; the ordinary method call syntax takes care of that implicitly.
+So with these definitions in place, you can use `Queue` like this:
+```rust
+let mut q = Queue { older: Vec::new(), younger: Vec::new() };
+
+q.push('0');
+q.push('1');
+assert_eq!(q.pop(), Some('0'));
+
+q.push('∞');
+assert_eq!(q.pop(), Some('1'));
+assert_eq!(q.pop(), Some('∞'));
+assert_eq!(q.pop(), None);
+```
+If a method doesn't need to modify its `self`, then you can define it to take a shared reference instead.
+For example:
+```rust
+impl Queue {
+    pub fn is_empty(&self) -> bool {
+        self.older.is_empty() && self.younger.is_empty()
+    }
+}
+```
+
+Sometimes, taking `self` by value like this, or even by reference, isn't enough, so Rust also lets you pass `self` via smart pointer types.
+
+#### Passing Self as a `Box`, `Rc`, or `Arc`
+
+A method's `self` argument can also be a `Box<Self>`, `Rc<Self>`, or `Arc<Self>`.
+Such a method can only be called on a value of the given pointer type.
+Calling the method passes ownership of the pointer to it.
 
 #### Type-Associated Functions
 
@@ -1201,6 +1245,12 @@ impl Queue {
     }
 }
 ```
+It's conventional in Rust for constructor functions to be named `new`; we've already seen `Vec::new`, `Box::new`, `HashMap::new`, and others.
+But there's nothing special about the name `new`.
+It's not a keyword, and types often have other associated functions that serve as constructors, like `Vec::with_capacity`.
+
+Although you can have many separate `impl` blocks for a single type, they must all be in the same crate that defines that type.
+However, Rust does let you attach your own methods to other types; we'll explain how in Chapter 11.
 
 ### Associated Consts
 
@@ -1212,11 +1262,14 @@ In generic struct definitions, the type names used in <angle brackets> are calle
 
 ### Generic Structs with Lifetime Parameters
 
+Similarly, you can think of `struct Extrema<'elt>` as meaning that, given any specific lifetime `'elt`, you can make an `Extrema<'elt>` that holds references with that lifetime.
+
 ### Generic Structs with Constant Parameters
 
 ### Deriving Common Traits for Struct Types
 
-But in the case of these standard traits, and several others, you don't need to implement them by hand unless you want some kind of custom behavior. Rust can automatically implement them for you, with mechanical accuracy.
+But in the case of these standard traits, and several others, you don't need to implement them by hand unless you want some kind of custom behavior.
+Rust can automatically implement them for you, with mechanical accuracy.
 Just add a `#[derive]` attribute to the struct:
 ```rust
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -1228,11 +1281,24 @@ struct Point {
 Each of these traits can be implemented automatically for a struct, provided that each of its fields implements the trait.
 We can ask Rust to derive `PartialEq` for `Point` because its two fields are both of type `f64`, which already implements `PartialEq`.
 
+Another reason is that implementing a trait is automatically a public feature, so copyability, cloneability, and so forth are all part of your struct's public API and should be chosen deliberately.
+
 ### Interior Mutability
+
+Mutability is like anything else: in excess, it causes problems, but you often want just a little bit of it.
 
 ## Chapter 10. Enums and Patterns
 
 A Rust enum can also contain data, even data of varying types.
+
+Enums are useful whenever a value might be either one thing or another.
+The "price" of using them is that you must access the data safely, using pattern matching, our topic for the second half of this chapter.
+
+Patterns, too, may be familiar if you've used unpacking in Python or destructuring in JavaScript, but Rust takes patterns further.
+Rust patterns are a little like regular expressions for all your data.
+They're used to test whether or not a value has a particular desired shape.
+They can extract several fields from a struct or tuple into local variables all at once.
+And like regular expressions, they are concise, typically doing it all in a single line of code.
 
 ### Enums
 
@@ -1280,7 +1346,7 @@ impl TimeUnit {
 So much for C-style enums.
 The more interesting sort of Rust enum is the kind whose variants hold data.
 
-### Enums with Data
+#### Enums with Data
 
 In all, Rust has three kinds of enum variant, echoing the three kinds of struct we showed in the previous chapter.
 Variants with no data correspond to unit-like structs.
@@ -1300,7 +1366,37 @@ enum RelationshipStatus {
 ```
 All constructors and fields of an enum share the same visibility as the enum itself.
 
+#### Enums in Memory
+
+#### Rich Data Structures Using Enums
+
+#### Generic Enums
+
+Enums can be generic.
+Two examples from the standard library are among the most-used data types in the language:
+```rust
+enum Option<T> {
+    None,
+    Some(T),
+}
+
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+```
+
+### Patterns
+
 ## Chapter 11. Traits and Generics
+
+One of the great discoveries in programming is that it's possible to write code that operates on values of many different types, *even types that haven't been invented yet*.
+Here are two examples:
+* `Vec<T>` is generic: you can create a vector of any type of value, including types defined in your program that the authors of `Vec` never anticipated.
+* Many things have `.write()` methods, including `File`s and `TcpStream`s.
+Your code can take a writer by reference, any writer, and send data to it.
+Your code doesn't have to care what type of writer it is.
+Later, if someone adds a new type of writer, your code will already support it.
 
 Of course, this capability is hardly new with Rust.
 It's called *polymorphism*, and it was the hot new programming language technology of the 1970s.
@@ -1337,6 +1433,14 @@ Only calls through `&mut dyn Write` incur the overhead of a dynamic dispatch, al
 
 #### Trait Objects
 
+There are two ways of using traits to write polymorphic code in Rust: trait objects and generics.
+
+This may be surprising if you're coming from C# or Java, but the reason is simple.
+In Java, a variable of type `OutputStream` (the Java standard interface analogous to `std::io::Write`) is a reference to any object that implements `OutputStream`.
+The fact that it's a reference goes without saying.
+It's the same with interfaces in C# and most other languages.
+
+What we want in Rust is the same thing, but in Rust, references are explicit:
 ```rust
 let mut buf: Vec<u8> = vec![];
 let writer: &mut dyn Write = &mut buf;  // ok
@@ -1346,15 +1450,27 @@ Like any other reference, a trait object points to some value, it has a lifetime
 
 What makes a trait object different is that Rust usually doesn't know the type of the referent at compile time.
 So a trait object includes a little extra information about the referent's type.
-This is strictly for Rust's own use behind the scenes: when you call `writer.write(data)`, Rust needs the type information to dynamically call the right write method depending on the type of `*writer`.
-You can't query the type information directly, and Rust does not support downcasting from the trait object &mut dyn Write back to a concrete type like `Vec<u8>`.
+This is strictly for Rust's own use behind the scenes: when you call `writer.write(data)`, Rust needs the type information to dynamically call the right `write` method depending on the type of `*writer`.
+You can't query the type information directly, and Rust does not support downcasting from the trait object `&mut dyn Write` back to a concrete type like `Vec<u8>`.
 
 #### Trait object layout
 
 In memory, a trait object is a fat pointer consisting of a pointer to the value, plus a pointer to a table representing that value's type.
 Each trait object therefore takes up two machine words, as shown in Figure 11-1.
 
+C++ has this kind of run-time type information as well.
+It's called a *virtual table*, or *vtable*.
 In Rust, as in C++, the vtable is generated once, at compile time, and shared by all objects of the same type.
+Everything shown in the darker shade in Figure 11-1, including the vtable, is a private implementation detail of Rust.
+Again, these aren't fields and data structures that you can access directly.
+Instead, the language automatically uses the vtable when you call a method of a trait object, to determine which implementation to call.
+
+Seasoned C++ programmers will notice that Rust and C++ use memory a bit differently.
+In C++, the vtable pointer, or *vptr*, is stored as part of the struct.
+Rust uses fat pointers instead.
+The struct itself contains nothing but its fields.
+This way, a struct can implement dozens of traits without containing dozens of vptrs.
+Even types like `i32`, which aren't big enough to accommodate a vptr, can implement traits.
 
 Rust automatically converts ordinary references into trait objects when needed.
 This is why we're able to pass `&mut local_file` to `say_hello` in this example:
@@ -1362,6 +1478,31 @@ This is why we're able to pass `&mut local_file` to `say_hello` in this example:
 let mut local_file = File::create("hello.txt")?;
 say_hello(&mut local_file)?;
 ```
+The type of `&mut local_file` is `&mut File`, and the type of the argument to `say_hello` is `&mut dyn Write`.
+Since a `File` is a kind of writer, Rust allows this, automatically converting the plain reference to a trait object.
+
+#### Generic Functions and Type Parameters
+
+Sometimes we need multiple abilities from a type parameter.
+
+A generic function can have both lifetime parameters and type parameters.
+Lifetime parameters come first:
+```rust
+/// Return a reference to the point in `candidates` that's
+/// closest to the `target` point.
+fn nearest<'t, 'c, P>(target: &'t P, candidates: &'c [P]) -> &'c P
+    where P: MeasureDistance
+{
+    ...
+}
+```
+
+#### Which to Use
+
+The choice of whether to use trait objects or generic code is subtle.
+Since both features are based on traits, they have a lot in common.
+
+Trait objects are the right choice whenever you need a collection of values of mixed types, all together.
 
 ### Defining and Implementing Traits
 
@@ -1371,6 +1512,8 @@ Give it a name and list the type signatures of the trait methods.
 To implement a trait, use the syntax `impl TraitName for Type`:
 
 #### Default Methods
+
+Your own traits can include default implementations using the same syntax.
 
 #### Traits and Other People's Types
 
@@ -1445,6 +1588,13 @@ str::to_string("hello")
 The second form looks exactly like a associated function call.
 This works even though the `to_string` method takes a `self` argument.
 Simply pass `self` as the function's first argument.
+
+Since `to_string` is a method of the standard `ToString` trait, there are two more forms you can use:
+```rust
+ToString::to_string("hello")
+
+<str as ToString>::to_string("hello")
+```
 
 ### Traits That Define Relationships Between Types
 
