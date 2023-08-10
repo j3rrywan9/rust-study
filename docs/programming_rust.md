@@ -1,5 +1,11 @@
 # Programming Rust, 2nd Edition
 
+## Chapter 1. Systems Programmers Can Have Nice Things
+
+### Rust Shoulders the Load for You
+
+The Rust language makes you a simple promise: if your program passes the compiler's checks, it is free of undefined behavior.
+
 ## Chapter 2. A Tour of Rust
 
 ### rustup and Cargo
@@ -1622,13 +1628,13 @@ This is called *operator overloading*, and the effect is much like operator over
 In Rust, the expression `a + b` is actually shorthand for `a.add(b)`, a call to the `add` method of the standard library's `std::ops::Add` trait.
 Rust's standard numeric types all implement `std::ops::Add`.
 
-## Unary Operators
+### Unary Operators
 
-## Binary Operators
+### Binary Operators
 
-## Compound Assignment Operators
+### Compound Assignment Operators
 
-## Equivalence Comparisons
+### Equivalence Comparisons
 
 Rust's equality operators, `==` and `!=`, are shorthand for calls to the `std::cmp::PartialEq` trait's `eq` and `ne` methods:
 ```rust
@@ -1678,6 +1684,18 @@ When a value's owner goes away, we say that Rust *drops* the value.
 Dropping a value entails freeing whatever other values, heap storage, and system resources the value owns.
 Drops occur under a variety of circumstances: when a variable goes out of scope; at the end of an expression statement; when you truncate a vector, removing elements from its end; and so on.
 
+However, if you want, you can customize how Rust drops values of your type by implementing the `std::ops::Drop` trait:
+```rust
+trait Drop {
+    fn drop(&mut self);
+}
+```
+An implementation of `Drop` is analogous to a destructor in C++, or a finalizer in other languages.
+When a value is dropped, if it implements `std::ops::Drop`, Rust calls its `drop` method, before proceeding to drop whatever values its fields or elements own, as it normally would.
+This implicit invocation of `drop` is the only way to call that method; if you try to invoke it explicitly yourself, Rust flags that as an error.
+
+Because Rust calls `Drop::drop` on a value before dropping its fields or elements, the value the method receives is always still fully initialized.
+
 ### `Sized`
 
 A *sized type* is one whose values all have the same size in memory.
@@ -1690,6 +1708,16 @@ Traits of this sort are called *marker traits*, because the Rust language itself
 However, Rust also has a few *unsized types* whose values are not all the same size.
 For example, the string slice type `str` (note, without an `&`) is unsized.
 
+The other common kind of unsized type in Rust is a `dyn` type, the referent of a trait object.
+As we explained in "Trait Objects", a trait object is a pointer to some value that implements a given trait.
+For example, the types `&dyn std::io::Write` and `Box<dyn std::io::Write>` are pointers to some value that implements the `Write` trait.
+The referent might be a file or a network socket or some type of your own for which you have implemented `Write`.
+Since the set of types that implement `Write` is open-ended, `dyn Write` considered as a type is unsized: its values have various sizes.
+
+Rust can't store unsized values in variables or pass them as arguments.
+You can only deal with them through pointers like `&str` or `Box<dyn Write>`, which themselves are sized.
+As shown in Figure 13-1, a pointer to an unsized value is always a fat pointer, two words wide: a pointer to a slice also carries the slice's length, and a trait object also carries a pointer to a vtable of method implementations.
+
 Since unsized types are so limited, most generic type variables should be restricted to `Sized` types.
 In fact, this is necessary so often that it is the implicit default in Rust: if you write `struct S<T> { ... }`, Rust understands you to mean struct `S<T: Sized> { ... }`.
 If you do not want to constrain `T` this way, you must explicitly opt out, writing struct `S<T: ?Sized> { ... }`.
@@ -1698,7 +1726,30 @@ For example, if you write `struct S<T: ?Sized> { b: Box<T> }`, then Rust will al
 
 ### `Clone`
 
+The `std::clone::Clone` trait is for types that can make copies of themselves.
+
 ### `Copy`
+
+At that time, we left it vague exactly what `Copy` was, but now we can tell you: a type is `Copy` if it implements the `std::marker::Copy` marker trait, which is defined as follows:
+```rust
+trait Copy: Clone { }
+```
+This is certainly easy to implement for your own types:
+```rust
+impl Copy for MyType { }
+```
+But because `Copy` is a marker trait with special meaning to the language, Rust permits a type to implement `Copy` only if a shallow byte-for-byte copy is all it needs.
+Types that own any other resources, like heap buffers or operating system handles, cannot implement `Copy`.
+
+Any type that implements the `Drop` trait cannot be `Copy`.
+Rust presumes that if a type needs special cleanup code, it must also require special copying code and thus can't be `Copy`.
+
+As with `Clone`, you can ask Rust to derive `Copy` for you, using `#[derive(Copy)]`.
+You will often see both derived at once, with `#[derive(Copy, Clone)]`.
+
+Think carefully before making a type `Copy`.
+Although doing so makes the type easier to use, it places heavy restrictions on its implementation.
+Implicit copies can also be expensive.
 
 ### `Deref` and `DerefMut`
 
@@ -1731,7 +1782,37 @@ These are called the *deref coercions*: one type is being "coerced" into behavin
 
 Rust will apply several deref coercions in succession if necessary.
 
+The `Deref` and `DerefMut` traits are designed for implementing smart pointer types, like `Box`, `Rc`, and `Arc`, and types that serve as owning versions of something you would also frequently use by reference, the way `Vec<T>` and `String` serve as owning versions of `[T]` and `str`.
+You should not implement `Deref` and `DerefMut` for a type just to make the `Target` type's methods appear on it automatically, the way a C++ base class's methods are visible on a subclass.
+This will not always work as you expect and can be confusing when it goes awry.
+
 ### `Default`
+
+Some types have a reasonably obvious default value: the default vector or string is empty, the default number is zero, the default `Option` is `None`, and so on.
+Types like this can implement the `std::default::Default` trait:
+```rust
+trait Default {
+    fn default() -> Self;
+}
+```
+The `default` method simply returns a fresh value of type `Self`.
+String's implementation of `Default` is straightforward:
+```rust
+impl Default for String {
+    fn default() -> String {
+        String::new()
+    }
+}
+```
+
+Another common use of `Default` is to produce default values for structs that represent a large collection of parameters, most of which you won't usually need to change.
+
+If a type `T` implements `Default`, then the standard library implements `Default` automatically for `Rc<T>`, `Arc<T>`, `Box<T>`, `Cell<T>`, `RefCell<T>`, `Cow<T>`, `Mutex<T>`, and `RwLock<T>`.
+The default value for the type `Rc<T>`, for example, is an `Rc` pointing to the default value for type `T`.
+
+If all the element types of a tuple type implement `Default`, then the tuple type does too, defaulting to a tuple holding each element's default value.
+
+Rust does not implicitly implement `Default` for struct types, but if all of a struct's fields implement `Default`, you can implement `Default` for the struct automatically using `#[derive(Default)]`.
 
 ### `AsRef` and `AsMut`
 
@@ -1773,7 +1854,9 @@ trait From<T>: Sized {
 ```
 The standard library automatically implements the trivial conversion from each type to itself: every type `T` implements `From<T>` and `Into<T>`.
 
+### `TryFrom` and `TryInto`
 
+### `ToOwned`
 
 ## Chapter 14. Closures
 
