@@ -1,24 +1,23 @@
 use anyhow::{anyhow, Result};
-use clap::{AppSettings, Clap};
+use clap::Parser;
 use reqwest::Url;
 use std::str::FromStr;
 
 /// A native httpie implementation with Rust, can you imagine how easy it is?
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 #[clap(version = "1.0", author = "Jerry Wang")]
-#[clap(setting = AppSettings::ColoredHelp)]
 struct Opts {
     #[clap(subcommand)]
     subcmd: SubCommand,
 }
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 enum SubCommand {
     Get(Get),
     Post(Post),
 }
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 struct Get {
     #[clap(parse(try_from_str = parse_url))]
     url: String,
@@ -47,7 +46,7 @@ fn parse_kv_pair(s: &str) -> Result<KvPair> {
     Ok(s.parse()?)
 }
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 struct Post {
     #[clap(parse(try_from_str = parse_url))]
     url: String,
