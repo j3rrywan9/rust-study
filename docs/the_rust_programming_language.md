@@ -1,5 +1,93 @@
 # The Rust Programming Language
 
+## 7. Managing Growing Projects With Packages, Crates, And Modules
+
+### Packages and Crates
+
+The first parts of the module system we'll cover are packages and crates.
+
+A crate can come in one of two forms: a binary crate or a library crate.
+A package can contain as many binary crates as you like, but at most only one library crate.
+A package must contain at least one crate, whether that's a library or binary crate.
+
+Cargo follows a convention that *src/main.rs* is the crate root of a binary crate with the same name as the package.
+Likewise, Cargo knows that if the package directory contains *src/lib.rs*, the package contains a library crate with the same name as the package, and *src/lib.rs* is its crate root.
+Cargo passes the crate root files to rustc to build the library or binary.
+
+### Defining Modules to Control Scope and Privacy
+
+In this section, we'll talk about modules and other parts of the module system, namely *paths*, which allow you to name items; the `use` keyword that brings a path into scope; and the `pub` keyword to make items public.
+We'll also discuss the `as` keyword, external packages, and the glob operator.
+
+*Modules* let us organize code within a crate for readability and easy reuse.
+Modules also allow us to control the *privacy* of items because code within a module is private by default.
+Private items are internal implementation details not available for outside use.
+We can choose to make modules and the items within them public, which exposes them to allow external code to use and depend on them.
+
+Earlier, we mentioned that *src/main.rs* and *src/lib.rs* are called crate roots.
+The reason for their name is that the contents of either of these two files form a module named `crate` at the root of the crate's module structure, known as the *module tree*.
+
+The module tree might remind you of the filesystem's directory tree on your computer; this is a very apt comparison!
+Just like directories in a filesystem, you use modules to organize your code.
+And just like files in a directory, we need a way to find our modules.
+
+### Paths for Referring to an Item in the Module Tree
+
+To show Rust where to find an item in a module tree, we use a path in the same way we use a path when navigating a filesystem.
+To call a function, we need to know its path.
+
+#### Exposing Paths with the `pub` Keyword
+
+#### Starting Relative Paths with `super`
+
+#### Making Structs and Enums Public
+
+We can also use `pub` to designate structs and enums as public, but there are a few extra details to the usage of pub with structs and enums.
+If we use `pub` before a struct definition, we make the struct public, but the struct's fields will still be private.
+We can make each field public or not on a case-by-case basis.
+
+In contrast, if we make an enum public, all of its variants are then public.
+We only need the `pub` before the `enum` keyword
+
+### Bring Paths into Scope with the `use` Keyword
+
+#### Creating Idiomatic `use` Paths
+
+#### Providing New Names with the `as` Keyword
+
+#### Re-exporting Names with `pub use`
+
+When we bring a name into scope with the `use` keyword, the name available in the new scope is private.
+To enable the code that calls our code to refer to that name as if it had been defined in that code's scope, we can combine `pub` and `use`.
+This technique is called *re-exporting* because we're bringing an item into scope but also making that item available for others to bring into their scope.
+
+Listing 7-17 shows the code in Listing 7-11 with use in the root module changed to `pub use`.
+
+**src/lib.rs**
+```rust
+mod front_of_house {
+    pub mod hosting {
+        pub fn add_to_waitlist() {}
+    }
+}
+
+pub use crate::front_of_house::hosting;
+
+pub fn eat_at_restaurant() {
+    hosting::add_to_waitlist();
+}
+```
+Listing 7-17: Making a name available for any code to use from a new scope with `pub use`
+
+Before this change, external code would have to call the `add_to_waitlist` function by using the path `restaurant::front_of_house::hosting::add_to_waitlist()`.
+Now that this `pub use` has re-exported the `hosting` module from the root module, external code can use the path `restaurant::hosting::add_to_waitlist()` instead.
+
+Re-exporting is useful when the internal structure of your code is different from how programmers calling your code would think about the domain.
+For example, in this restaurant metaphor, the people running the restaurant think about "front of house" and "back of house."
+But customers visiting a restaurant probably won't think about the parts of the restaurant in those terms.
+With `pub use`, we can write our code with one structure but expose a different structure.
+Doing so makes our library well organized for programmers working on the library and programmers calling the library.
+
 ## 10. Generic Types, Traits, and Lifetimes
 
 Every programming language has tools for effectively handling the duplication of concepts.
