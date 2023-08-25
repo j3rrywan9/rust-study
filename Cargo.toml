@@ -1,4 +1,6 @@
 [workspace]
+resolver = "2"
+
 members = [
     "chrono_panic_poc",
     "clap_panic_poc",
@@ -6,4 +8,5 @@ members = [
     "leetcode",
     "samples",
     "scrabble",
+    "sqlx_migration_poc",
 ]

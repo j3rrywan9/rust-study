@@ -1,0 +1,14 @@
+services:
+  db:
+    container_name: poc-db
+    image: postgres:15.4
+    ports:
+      - "6543:5432"
+    restart: always
+    env_file:
+      - localdev.env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
