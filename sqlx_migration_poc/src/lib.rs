@@ -5,10 +5,10 @@ use tracing::subscriber::set_global_default;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{fmt, registry, EnvFilter};
 
-mod db;
+pub mod db;
 mod endpoints;
 mod error;
-mod schema;
+pub mod schema;
 
 pub fn init_logging_from_env() {
     let json_layer = fmt::layer()

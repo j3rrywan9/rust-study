@@ -89,6 +89,5 @@ pub async fn init_pool_from_env_and_migrate() -> Result<PgPool, Error> {
 }
 
 pub async fn get_pool() -> Result<&'static PgPool, Error> {
-    POOL.get_or_try_init(init_pool_from_env_and_migrate)
-        .await
+    POOL.get_or_try_init(init_pool_from_env_and_migrate).await
 }
