@@ -8,5 +8,6 @@ members = [
     "leetcode",
     "samples",
     "scrabble",
+    "smart_pointers_poc",
     "sqlx_migration_poc",
 ]
