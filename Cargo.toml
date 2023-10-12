@@ -6,6 +6,7 @@ members = [
     "clap_panic_poc",
     "httpie",
     "leetcode",
+    "pipe_poc",
     "samples",
     "scrabble",
     "smart_pointers_poc",
