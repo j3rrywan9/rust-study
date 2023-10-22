@@ -2173,6 +2173,126 @@ For this, you can use `async_std::task::spawn_local`.
 This function takes a future and adds it to a pool that `block_on` will try polling whenever the future it's blocking on isn't ready.
 So if you pass a bunch of futures to `spawn_local` and then apply `block_on` to a future of your final result, `block_on` will poll each spawned future whenever it is able to make progress, running the entire pool concurrently until your result is ready.
 
+As of this writing, `spawn_local` is available in `async-std` only if you enable that crate's `unstable` feature.
+To do this, you'll need to refer to `async-std` in your *Cargo.toml* with a line like this:
+```toml
+async-std = { version = "1", features = ["unstable"] }
+```
+The `spawn_local` function is an asynchronous analogue of the standard library's `std::thread::spawn` function for starting threads:
+* `std::thread::spawn(c)` takes a closure `c` and starts a thread running it, returning a `std::thread::JoinHandle` whose `join` method waits for the thread to finish and returns whatever `c` returned.
+* `async_std::task::spawn_local(f)` takes the future `f` and adds it to the pool to be polled when the current thread calls `block_on`.
+`spawn_local` returns its own `async_std::task::JoinHandle` type, itself a future that you can await to retrieve `f`'s final value.
+
+For example, suppose we want to make a whole set of HTTP requests concurrently.
+Here's a first attempt:
+```rust
+pub async fn many_requests(requests: Vec<(String, u16, String)>) -> Vec<std::io::Result<String>>
+{
+    use async_std::task;
+
+    let mut handles = vec![];
+    for (host, port, path) in requests {
+        handles.push(task::spawn_local(cheapo_request(&host, port, &path)));
+    }
+
+    let mut results = vec![];
+    for handle in handles {
+        results.push(handle.await);
+    }
+
+    results
+}
+```
+This function calls `cheapo_request` on each element of requests, passing each call's future to `spawn_local`.
+It collects the resulting `JoinHandle`s in a vector and then awaits each of them.
+It's fine to await the join handles in any order: since the requests are already spawned, their futures will be polled as needed whenever this thread calls `block_on` and has nothing better to do.
+All the requests will run concurrently.
+Once they're complete, `many_requests` returns the results to its caller.
+
+The previous code is almost correct, but Rust's borrow checker is worried about the lifetime of `cheapo_request`'s future:
+```
+error: `host` does not live long enough
+
+    handles.push(task::spawn_local(cheapo_request(&host, port, &path)));
+                                   ---------------^^^^^--------------
+                                   |              |
+                                   |              borrowed value does not
+                                   |              live long enough
+                     argument requires that `host` is borrowed for `'static`
+}
+- `host` dropped here while still borrowed
+```
+There's a similar error for `path` as well.
+
+Naturally, if we pass references to an asynchronous function, the future it returns must hold those references, so the future cannot safely outlive the values they borrow.
+This is the same restriction that applies to any value that holds references.
+
+The problem is that `spawn_local` can't be sure you'll wait for the task to finish before `host` and `path` are dropped.
+In fact, `spawn_local` only accepts futures whose lifetimes are `'static`, because you could simply ignore the `JoinHandle` it returns and let the task continue to run for the rest of the program's execution.
+This isn't unique to asynchronous tasks: you'll get a similar error if you try to use `std::thread::spawn` to start a thread whose closure captures references to local variables.
+
+One way to fix this is to create another asynchronous function that takes owned versions of the arguments:
+```rust
+async fn cheapo_owning_request(host: String, port: u16, path: String) -> std::io::Result<String> {
+    cheapo_request(&host, port, &path).await
+}
+```
+This function takes `String`s instead of `&str` references, so its future owns the `host` and `path` strings itself, and its lifetime is `'static`.
+The borrow checker can see that it immediately awaits `cheapo_request`'s future, and hence, if that future is getting polled at all, the `host` and `path` variables it borrows must still be around.
+All is well.
+
+Using `cheapo_owning_request`, you can spawn off all your requests like so:
+```rust
+for (host, port, path) in requests {
+    handles.push(task::spawn_local(cheapo_owning_request(host, port, path)));
+}
+```
+You can call `many_requests` from your synchronous `main` function, with `block_on`:
+```rust
+let requests = vec![
+    ("example.com".to_string(),      80, "/".to_string()),
+    ("www.red-bean.com".to_string(), 80, "/".to_string()),
+    ("en.wikipedia.org".to_string(), 80, "/".to_string()),
+];
+
+let results = async_std::task::block_on(many_requests(requests));
+for result in results {
+    match result {
+        Ok(response) => println!("{}", response),
+        Err(err) => eprintln!("error: {}", err),
+    }
+}
+```
+This code runs all three requests concurrently from within the call to `block_on`.
+Each one makes progress as the opportunity arises while the others are blocked, all on the calling thread.
+Figure 20-3 shows one possible execution of the three calls to `cheapo_request`.
+
+(We encourage you to try running this code yourself, with `eprintln!` calls added at the top of `cheapo_request` and after each `await` expression so that you can see how the calls interleave differently from one execution to the next.)
+
+The call to `many_requests` (not shown, for simplicity) has spawned three asynchronous tasks, which we've labeled `A`, `B`, and `C`.
+`block_on` begins by polling `A`, which starts connecting to `example.com`.
+As soon as this returns `Poll::Pending`, `block_on` turns its attention to the next spawned task, polling future `B`, and eventually `C`, which each begin connecting to their respective servers.
+
+When all the pollable futures have returned `Poll::Pending`, `block_on` goes to sleep until one of the `TcpStream::connect` futures indicates that its task is worth polling again.
+
+In this execution, the server `en.wikipedia.org` responds more quickly than the others, so that task finishes first.
+When a spawned task is done, it saves its value in its `JoinHandle` and marks it as ready, so that `many_requests` can proceed when it awaits it.
+Eventually, the other calls to `cheapo_request` will either succeed or return an error, and `many_requests` itself can return.
+Finally, `main` receives the vector of results from `block_on`.
+
+All this execution takes place on a single thread, the three calls to `cheapo_request` being interleaved with each other through successive polls of their futures.
+An asynchronous call offers the appearance of a single function call running to completion, but this asynchronous call is realized by a series of synchronous calls to the future's `poll` method.
+Each individual `poll` call returns quickly, yielding the thread so that another async call can take a turn.
+
+We have finally achieved the goal we set out at the beginning of the chapter: letting a thread take on other work while it waits for I/O to complete so that the thread's resources aren't tied up doing nothing.
+Even better, this goal was met with code that looks very much like ordinary Rust code: some of the functions are marked `async`, some of the function calls are followed by `.await`, and we use functions from `async_std` instead of `std`, but otherwise, it's ordinary Rust code.
+
+One important difference to keep in mind between asynchronous tasks and threads is that switching from one async task to another happens only at await expressions, when the future being awaited returns `Poll::Pending`.
+This means that if you put a long-running computation in `cheapo_request`, none of the other tasks you passed to `spawn_local` will get a chance to run until it's done.
+With threads, this problem doesn't arise: the operating system can suspend any thread at any point and sets timers to ensure that no thread monopolizes the processor.
+Asynchronous code depends on the willing cooperation of the futures sharing the thread.
+If you need to have long-running computations coexist with asynchronous code, "Long Running Computations: yield_now and spawn_blocking" later in this chapter describes some options.
+
 #### Async Blocks
 
 In addition to asynchronous functions, Rust also supports *asynchronous blocks*.
@@ -2192,16 +2312,173 @@ let serve_one = async {
     ...
 };
 ```
+This initializes `serve_one` with a future that, when polled, listens for and handles a single TCP connection.
+The block's body does not begin execution until `serve_one` gets polled, just as an async function call doesn's begin execution until its future is polled.
+
+If you apply the `?` operator to an error in an async block, it just returns from the block, not from the surrounding function.
+For example, if the preceding bind call returns an error, the `?` operator returns it as `serve_one`'s final value.
+Similarly, return expressions return from the async block, not the enclosing function.
+
+If an async block refers to variables defined in the surrounding code, its future captures their values, just as a closure would.
+And just like `move` closures (see "Closures That Steal"), you can start the block with `async move` to take ownership of the captured values, rather than just holding references to them.
+
+Async blocks provide a concise way to separate out a section of code you'd like to run asynchronously.
+For example, in the previous section, spawn_local required a `'static` future, so we defined the `cheapo_owning_request` wrapper function to give us a future that took ownership of its arguments.
+You can get the same effect without the distraction of a wrapper function simply by calling `cheapo_request` from an async block:
+```rust
+pub async fn many_requests(requests: Vec<(String, u16, String)>) -> Vec<std::io::Result<String>>
+{
+    use async_std::task;
+
+    let mut handles = vec![];
+    for (host, port, path) in requests {
+        handles.push(task::spawn_local(async move {
+            cheapo_request(&host, port, &path).await
+        }));
+    }
+    ...
+}
+```
+Since this is an `async move` block, its future takes ownership of the `String` values `host` and `path`, just the way a `move` closure would.
+It then passes references to `cheapo_request`.
+The borrow checker can see that the block's `await` expression takes ownership of `cheapo_request`'s future, so the references to `host` and `path` cannot outlive the captured variables they borrow.
+The async block accomplishes the same thing as `cheapo_owning_request`, but with less boilerplate.
 
 #### Building Async Functions from Async Blocks
 
 Asynchronous blocks give us another way to get the same effect as an asynchronous function, with a little more flexibility.
+For example, we could write our `cheapo_request` example as an ordinary, synchronous function that returns the future of an async block:
+```rust
+use std::io;
+use std::future::Future;
 
-####
+fn cheapo_request<'a>(host: &'a str, port: u16, path: &'a str) -> impl Future<Output = io::Result<String>> + 'a
+{
+    async move {
+        ... function body ...
+    }
+}
+```
+When you call this version of the function, it immediately returns the future of the async block's value.
+This captures the function's arguments and behaves just like the future the asynchronous function would have returned.
+Since we're not using the `async fn` syntax, we need to write out the `impl Future` in the return type, but as far as callers are concerned, these two definitions are interchangeable implementations of the same function signature.
+
+This second approach can be useful when you want to do some computation immediately when the function is called, before creating the future of its result. For example, yet another way to reconcile `cheapo_request` with `spawn_local` would be to make it into a synchronous function returning a `'static` future that captures fully owned copies of its arguments:
+```rust
+fn cheapo_request(host: &str, port: u16, path: &str) -> impl Future<Output = io::Result<String>> + 'static
+{
+    let host = host.to_string();
+    let path = path.to_string();
+
+    async move {
+        ... use &*host, port, and path ...
+    }
+}
+```
+This version lets the async block capture `host` and `path` as owned `String` values, not `&str` references.
+Since the future owns all the data it needs to run, it is valid for the `'static` lifetime.
+(We've spelled out `+ 'static` in the signature shown earlier, but `'static` is the default for `-> impl` return types, so omitting it would have no effect.)
+
+Since this version of `cheapo_request` returns futures that are `'static`, we can pass them directly to `spawn_local`:
+```rust
+let join_handle = async_std::task::spawn_local(
+    cheapo_request("areweasyncyet.rs", 80, "/")
+);
+
+... other work ...
+
+let response = join_handle.await?;
+```
+
+#### Spawning Async Tasks on a Thread Pool
+
+The examples we’ve shown so far spend almost all their time waiting for I/O, but some workloads are more of a mix of processor work and blocking.
+When you have enough computation to do that a single processor can't keep up, you can use `async_std::task::spawn` to spawn a future onto a pool of worker threads dedicated to polling futures that are ready to make progress.
+
+`async_std::task::spawn` is used like `async_std::task::spawn_local`:
+```rust
+use async_std::task;
+
+let mut handles = vec![];
+for (host, port, path) in requests {
+    handles.push(task::spawn(async move {
+        cheapo_request(&host, port, &path).await
+    }));
+}
+...
+```
+Like `spawn_local`, `spawn` returns a `JoinHandle` value you can await to get the future's final value.
+But unlike `spawn_local`, the future doesn't have to wait for you to call `block_on` before it gets polled.
+As soon as one of the threads from the thread pool is free, it will try polling it.
+
+In practice, `spawn` is more widely used than `spawn_local`, simply because people like to know that their workload, no matter what its mix of computation and blocking, is balanced across the machine's resources.
+
+One thing to keep in mind when using `spawn` is that the thread pool tries to stay busy, so your future gets polled by whichever thread gets around to it first.
+An async call may begin execution on one thread, block on an `await` expression, and get resumed in a different thread.
+So while it's a reasonable simplification to view an async function call as a single, connected execution of code (indeed, the purpose of asynchronous functions and `await` expressions is to encourage you to think of it that way), the call may actually be carried out by many different threads.
+
+If you're using thread-local storage, it may be surprising to see the data you put there before an `await` expression replaced by something entirely different afterward, because your task is now being polled by a different thread from the pool.
+If this is a problem, you should instead use task-local storage; see the `async-std` crate's documentation for the `task_local!` macro for details.
 
 #### But Does Your Future Implement `Send`?
 
+There is one restriction `spawn` imposes that `spawn_local` does not.
+Since the future is being sent off to another thread to run, the future must implement the `Send` marker trait.
+We presented `Send` in "Thread Safety: Send and Sync".
+A future is `Send` only if all the values it contains are `Send`: all the function arguments, local variables, and even anonymous temporary values must be safe to move to another thread.
+
+As before, this requirement isn't unique to asynchronous tasks: you'll get a similar error if you try to use `std::thread::spawn` to start a thread whose closure captures non-`Send` values.
+The difference is that, whereas the closure passed to `std::thread::spawn` stays on the thread that was created to run it, a future spawned on a thread pool can move from one thread to another any time it awaits.
+
 #### Long Running Computations: `yield_now` and `spawn_blocking`
+
+For a future to share its thread nicely with other tasks, its poll method should always return as quickly as possible.
+But if you're carrying out a long computation, it could take a long time to reach the next await, making other asynchronous tasks wait longer than you'd like for their turn on the thread.
+
+One way to avoid this is simply to await something occasionally.
+The `async_std::task::yield_now` function returns a simple future designed for this:
+```rust
+while computation_not_done() {
+    ... do one medium-sized step of computation ...
+    async_std::task::yield_now().await;
+}
+```
+The first time the `yield_now` future is polled, it returns `Poll::Pending`, but says it's worth polling again soon.
+The effect is that your asynchronous call gives up the thread and other tasks get a chance to run, but your call will get another turn soon.
+The second time `yield_now`'s future is polled, it returns `Poll::Ready(())`, and your async function can resume execution.
+
+This approach isn't always feasible, however.
+If you're using an external crate to do the long-running computation or calling out to C or C++, it may not be convenient to change that code to be more async-friendly.
+Or it may be difficult to ensure that every path through the computation is sure to hit the `await` from time to time.
+
+For cases like this, you can use `async_std::task::spawn_blocking`.
+This function takes a closure, starts it running on its own thread, and returns a future of its return value.
+Asynchronous code can await that future, yielding its thread to other tasks until the computation is ready.
+By putting the hard work on a separate thread, you can let the operating system take care of making it share the processor nicely.
+
+For example, suppose we need to check passwords supplied by users against the hashed versions we've stored in our authentication database.
+For security, verifying a password needs to be computationally intensive so that even if attackers get a copy of our database, they can't simply try trillions of possible passwords to see if any match.
+The `argonautica` crate provides a hash function designed specifically for storing passwords: a properly generated `argonautica` hash takes a significant fraction of a second to verify.
+We can use `argonautica` (version `0.2`) in our asynchronous application like this:
+```rust
+async fn verify_password(password: &str, hash: &str, key: &str) -> Result<bool, argonautica::Error>
+{
+    // Make copies of the arguments, so the closure can be 'static.
+    let password = password.to_string();
+    let hash = hash.to_string();
+    let key = key.to_string();
+
+    async_std::task::spawn_blocking(move || {
+        argonautica::Verifier::default()
+            .with_hash(hash)
+            .with_password(password)
+            .with_secret_key(key)
+            .verify()
+    }).await
+}
+```
+This returns `Ok(true)` if `password` matches `hash`, given `key`, a key for the database as a whole.
+By doing the verification in the closure passed to `spawn_blocking`, we push the expensive computation onto its own thread, ensuring that it will not affect our responsiveness to other users' requests.
 
 #### Comparing Asynchronous Designs
 
