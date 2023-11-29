@@ -11,7 +11,77 @@ The exact details of these memory regions vary between platforms and are beyond 
 
 #### Memory Terminology
 
+Before we dive into regions of memory, you first need to know about the difference between values, variables, and pointers.
+A *value* in Rust is the combination of a type and an element of that type's domain of values.
+A value can be turned into a sequence of bytes using its type's *representation*, but on its own you can think of a value more like what you, the programmer, meant.
+A value's meaning is independent of the location where those bytes are stored.
+
+A value is stored in a *place*, which is the Rust terminology for "a location that can hold a value."
+This place can be on the stack, on the heap, or in a number of other locations.
+The most common place to store a value is a *variable*, which is a named value slot on the stack.
+
+A *pointer* is a value that holds the address of a region of memory, so the pointer points to a place.
+A pointer can be dereferenced to access the value stored in the memory location it points to.
+We can store the same pointer in more than one variable and therefore have multiple variables that indirectly refer to the same location in memory and thus the same underlying value.
+
 #### Variables in Depth
+
+The definition of a variable I gave earlier is broad and unlikely to be all that useful in and of itself.
+As you encounter more complex code, you'll need a more accurate mental model to help you reason through what the programs are really doing.
+There are many such models that we can make use of.
+Describing them all in detail would take up several chapters and is beyond the scope of this book, but broadly speaking, they can be divided into two categories: high-level models and low-level models.
+High-level models are useful when thinking about code at the level of lifetimes and borrows, while low-level models are good for when you are reasoning about unsafe code and raw pointers.
+The models for variables described in the following two sections will suffice for most of the material in this book.
+
+##### High-Level Model
+
+##### Low-Level Model
+
+#### Memory Regions
+
+Now that you have a grip on how we refer to memory, we need to talk about what memory actually is.
+There are many different regions of memory, and perhaps surprisingly, not all of them are stored in the DRAM of your computer.
+Which part of memory you use has a significant impact on how you write your code.
+The three most important regions for the purposes of writing Rust code are the stack, the heap, and static memory.
+
+##### The Stack
+
+##### The Heap
+
+##### Static Memory
+
+*Static memory* is really a catch-all term for several closely related regions located in the file your program is compiled into.
+These regions are automatically loaded into your program's memory when that program is executed.
+Values in static memory live for the entire execution of your program.
+Your program's static memory contains the program's binary code, which is usually mapped as read-only.
+As your program executes, it walks through the binary code in the text segment instruction by instruction and jumps around whenever a function is called.
+Static memory also holds the memory for variables you declare with the `static` keyword, as well as certain constant values in your code, like strings.
+
+The special lifetime `'static`, which gets its name from the static memory region, marks a reference as being valid for "as long as static memory is around," which is until the program shuts down.
+Since a static variable's memory is allocated when the program starts, a reference to a variable in static memory is, by definition, `'static`, as it is not deallocated until the program shuts down.
+The inverse is not true - there can be `'static` references that do not point to static memory - but the name is still appropriate: once you create a reference with a static lifetime, whatever it points to might as well be in static memory as far as the rest of the program is concerned, as it can be used for however long your program wishes.
+
+### Ownership
+
+Rust's memory model centers on the idea that all values have a single *owner* - that is, exactly one location (usually a scope) is responsible for ultimately deallocating each value.
+This is enforced through the borrow checker.
+If the value is moved, such as by assigning it to a new variable, pushing it to a vector, or placing it on the heap, the ownership of the value moves from the old location to the new one.
+At that point, you can no longer access the value through variables that flow from the original owner, even though the bits that make up the value are technically still there.
+Instead, you must access the moved value through variables that refer to its new location.
+
+Some types are rebels and do not follow this rule.
+If a value's type implements the special `Copy` trait, the value is not considered to have moved even if it is reassigned to a new memory location.
+Instead, the value is *copied*, and both the old and new locations remain accessible.
+Essentially, another identical instance of that same value is constructed at the destination of the move.
+Most primitive types in Rust, such as the integer and floating-point types, are `Copy`.
+To be `Copy`, it must be possible to duplicate the type's values simply by copying their bits.
+This eliminates all types that *contain* non-`Copy` types as well as any type that owns a resource it must deallocate when the value is dropped.
+
+When a value's owner no longer has use for it, it is the owner's responsibility to do any necessary cleanup for that value by *dropping* it.
+In Rust, dropping happens automatically when the variable that holds the value is no longer in scope.
+Types usually recursively drop values they contain, so dropping a variable of a complex type may result in many values being dropped.
+Because of Rust's discrete ownership requirement, we cannot accidentally drop the same value multiple times.
+A variable that holds a reference to another value does not own that other value, so the value isn't dropped when the variable drops.
 
 ### Borrowing and Lifetimes
 
@@ -24,9 +94,35 @@ A shared reference, `&T`, is, as the name implies, a pointer that may be shared.
 Any number of other references may exist to the same value, and each shared reference is `Copy`, so you can trivially make more of them.
 Values behind shared references are not mutable; you cannot modify or reassign the value a shared reference points to, nor can you cast a shared reference to a mutable one.
 
+The Rust compiler is allowed to assume that the value a shared reference points to will not change while that reference lives.
+
 #### Mutable References
 
+The alternative to a shared reference is a mutable reference: `&mut T`.
+With mutable references, the Rust compiler is again allowed to make full use of the contract that the reference comes with: the compiler assumes that there are no other threads accessing the target value, whether through a shared reference or a mutable one.
+In other words, it assumes that the mutable reference is exclusive.
+This enables some interesting optimizations that are not readily available in other languages.
+
+A mutable reference lets you mutate only the memory location that the reference points to.
+Whether you can mutate values that lie beyond the immediate reference depends on the methods provided by the type that lies between.
+
+The primary difference between owning a value and having a mutable reference to it is that the owner is responsible for dropping the value when it is no longer necessary.
+Apart from that, you can do anything through a mutable reference that you can if you own the value, with one caveat: if you move the value behind the mutable reference, then you must leave another value in its place.
+If you did not, the owner would still think it needed to drop the value, but there would be no value for it to drop!
+
 #### Interior Mutability
+
+Some types provide *interior mutability*, meaning they allow you to mutate a value through a shared reference.
+These types usually rely on additional mechanisms (like atomic CPU instructions) or invariants to provide safe mutability without relying on the semantics of exclusive references.
+These normally fall into two categories: those that let you get a mutable reference through a shared reference, and those that let you replace a value given only a shared reference.
+
+The first category consists of types like `Mutex` and `RefCell`, which contain safety mechanisms to ensure that, for any value they give a mutable reference to, only one mutable reference (and no shared references) can exist at a time.
+Under the hood, these types (and those like them) all rely on a type called `UnsafeCell`, whose name should immediately make you hesitate to use it.
+We will cover `UnsafeCell` in more detail in Chapter 9, but for now you should know that it is the only correct way to mutate through a shared reference.
+
+Other categories of types that provide interior mutability are those that do not give out a mutable reference to the inner value but instead just give you methods for manipulating that value in place.
+The atomic integer types in `std::sync::atomic` and the `std::cell::Cell` type fall into this category.
+You cannot get a reference directly to the `usize` or `i32` behind such a type, but you can read and replace its value at a given point in time.
 
 #### Lifetimes
 
