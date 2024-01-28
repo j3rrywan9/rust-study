@@ -1,5 +1,4 @@
 use std::env;
-use std::net::{Ipv4Addr, SocketAddr};
 use tracing::info;
 use tracing::subscriber::set_global_default;
 use tracing_subscriber::layer::SubscriberExt;
@@ -48,14 +47,14 @@ pub fn init_logging_from_env() {
 pub async fn start_server() -> Result<(), Box<dyn std::error::Error>> {
     let pool = db::get_pool().await?;
 
-    let app = endpoints::create_routes(pool);
+    let router = endpoints::create_routes(pool);
     let port = 3000;
-    let addr = SocketAddr::from((Ipv4Addr::new(0, 0, 0, 0), port));
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
+        .await
+        .unwrap();
 
     info!("Listening on port: {}", port);
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await?;
+    axum::serve(listener, router).await.unwrap();
 
     Ok(())
 }
