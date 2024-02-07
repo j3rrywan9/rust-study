@@ -1332,6 +1332,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lifetimes_poc"
+version = "0.1.0"
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
