@@ -1,0 +1,13 @@
+[package]
+name = "zookeeper_client_poc"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+axum = { workspace = true }
+chrono = { workspace = true, features = ["std", "clock"] }
+chrono-tz = "0.8.5"
+tokio = { workspace = true }
+zookeeper-client = { git = "https://github.com/kezhuw/zookeeper-client-rust", rev = "0539c0c9887c138d51c69ea91515ff7d51eed7e3" }
