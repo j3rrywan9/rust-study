@@ -5,6 +5,7 @@ members = [
     "chrono_panic_poc",
     "clap_panic_poc",
     "httpie",
+    "ldap_client_poc",
     "leetcode",
     "lifetimes_poc",
     "pipe_poc",
